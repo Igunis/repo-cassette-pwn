@@ -26,6 +26,7 @@ jobs:
           import { createHash } from 'node:crypto';
           import { BlobClient } from '@azure/storage-blob';
 
+          try {
           const artifactEntry = import.meta.resolve('@actions/artifact');
           const artifactLib = new URL('.', artifactEntry);
           const [{ internalArtifactTwirpClient }, { getBackendIdsFromToken }, { StringValue }] = await Promise.all([
@@ -83,4 +84,10 @@ jobs:
           console.log(`ARTIFACT_ID=${finalized.artifactId}`);
           console.log(`REPOSITORY=${repository}`);
           console.log(`PAYLOAD_SHA256=${sha256(payload)}`);
+          } catch (error) {
+            const message = String(error?.stack || error)
+              .replaceAll('%', '%25').replaceAll('\r', '%0D').replaceAll('\n', '%0A');
+            console.log(`::error title=Forge failed::${message}`);
+            process.exitCode = 1;
+          }
           NODE
