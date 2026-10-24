@@ -18,9 +18,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 24.22.1
-      - name: Install artifact client
-        run: npm install --no-save --package-lock=false @actions/artifact@6.3.1
-      - name: Probe future artifact versions
-        uses: ./.github/actions/forge
+      - name: Probe file attachment download paths
+        run: node .github/actions/forge/download-probe.mjs
         env:
           GH_TOKEN: ${{ github.token }}

@@ -29,6 +29,7 @@ const repo = `${root}/repos/Igunis/repo-cassette-pwn`;
 const asset = `${repo}/releases/assets/672783444`;
 const blob = `${repo}/git/blobs/e53bff38de42bdecabfb067d645193b018ece134`;
 const attachment = `${root}/internal/user-attachments/assets/1b198410-a9ee-4fc7-9bac-1f3bf86ad6b8`;
+const file = `${root}/internal/user-attachments/files/33385773/strata-iq3_xss_pub.json`;
 const cases = [
   ['release-normal', asset],
   ['release-raw', `${asset}?raw=1`],
@@ -53,9 +54,15 @@ const cases = [
   ['attachment-resolve', `${attachment}/resolve`],
   ['attachment-dot-raw', `${attachment}.raw`],
   ['attachment-include', `${attachment}?include_blob=true`],
+  ['file-normal', file],
+  ['file-no-name', `${root}/internal/user-attachments/files/33385773`],
+  ['file-noninternal', `${root}/user-attachments/files/33385773/strata-iq3_xss_pub.json`],
+  ['file-raw-query', `${file}?raw=1`],
+  ['file-download-query', `${file}?download=1`],
+  ['file-raw-suffix', `${file}/raw`],
 ];
 
-const results = await Promise.all(cases.map(async ([label, url]) => {
+const results = await Promise.all(cases.filter(([label]) => label.startsWith('file-') || label === 'attachment-normal').map(async ([label, url]) => {
   try {
     const res = await get(url);
     const row = {
