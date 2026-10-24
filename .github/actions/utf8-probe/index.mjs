@@ -1,6 +1,6 @@
 import { spawnSync } from 'node:child_process';
 
-const result = spawnSync('python3', ['invalid_utf8_mime_probe.py'], {
+const result = spawnSync('node', ['unicode_mime_probe.mjs'], {
   stdio: 'inherit',
   env: process.env,
 });

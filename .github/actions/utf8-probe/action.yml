@@ -1,5 +1,5 @@
-name: Probe invalid UTF8 MIME
-description: Test raw protobuf MIME parsing with the Actions runtime token
+name: Probe Unicode MIME
+description: Test whether Unicode MIME suffixes bypass artifact validation
 runs:
   using: node24
   main: index.mjs

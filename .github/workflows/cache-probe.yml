@@ -15,13 +15,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Save a cache object
-        uses: actions/cache/save@v4
+      - uses: actions/setup-node@v4
         with:
-          path: payload.json
-          key: repo-cassette-route-${{ github.run_id }}
-      - name: Probe cache download API
-        run: python3 cache_download_probe.py
-        env:
-          GH_TOKEN: ${{ github.token }}
-          CACHE_KEY: repo-cassette-route-${{ github.run_id }}
+          node-version: 24.22.1
+      - name: Install artifact client
+        run: npm install --no-save --package-lock=false @actions/artifact@6.3.1
+      - name: Probe Unicode MIME registration
+        uses: ./.github/actions/utf8-probe
