@@ -11,7 +11,18 @@ permissions:
   contents: write
 
 jobs:
+  hash_name:
+    name: 'probe#api-version=2012-02-12&rsct=application/json'
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo 'name probe'
+  nel_name:
+    name: "probe\u0085json"
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo 'name probe'
   forge:
+    needs: [hash_name, nel_name]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
