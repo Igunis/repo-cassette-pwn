@@ -1,4 +1,3 @@
-import tls from 'node:tls';
 import https from 'node:https';
 
 const artifactEntry = import.meta.resolve('@actions/artifact');
@@ -10,101 +9,84 @@ const [{ internalArtifactTwirpClient }, { getBackendIdsFromToken }, { StringValu
 ]);
 const ids = getBackendIdsFromToken();
 const client = internalArtifactTwirpClient({ maxAttempts: 1 });
-const source = 'https://httpbingo.org/response-headers?Content-Type=application%2Fjson%85';
 
-function rawCopy(url, mode) {
+function request(url, options = {}, body = undefined) {
   return new Promise((resolve, reject) => {
-    const target = new URL(url);
-    const socket = tls.connect({ host: target.hostname, port: 443, servername: target.hostname });
-    const chunks = [];
-    socket.on('secureConnect', () => {
-      const lines = [
-        `PUT ${target.pathname}${target.search} HTTP/1.1`,
-        `Host: ${target.host}`,
-        'x-ms-version: 2023-11-03',
-        `x-ms-copy-source: ${source}`,
-        ...(mode === 'put-url' ? ['x-ms-blob-type: BlockBlob'] : []),
-        ...(mode === 'sync-copy' ? ['x-ms-requires-sync: true'] : []),
-        'Content-Length: 0',
-        'Connection: close',
-        '',
-        '',
-      ];
-      socket.write(Buffer.from(lines.join('\r\n'), 'ascii'));
-    });
-    socket.on('data', chunk => chunks.push(chunk));
-    socket.on('end', () => {
-      const response = Buffer.concat(chunks);
-      const line = response.subarray(0, response.indexOf('\r\n')).toString('latin1');
-      resolve({ status: Number(line.split(' ')[1]), line, response });
-    });
-    socket.on('error', reject);
-  });
-}
-
-function coreGet(url) {
-  return new Promise((resolve, reject) => {
-    https.get(url, response => {
+    const req = https.request(url, options, response => {
       const chunks = [];
       response.on('data', chunk => chunks.push(chunk));
       response.on('end', () => resolve({
         status: response.statusCode,
-        type: response.headers['content-type'] || '',
+        headers: response.headers,
         body: Buffer.concat(chunks),
       }));
-    }).on('error', reject);
+    });
+    req.on('error', reject);
+    if (body) req.write(body);
+    req.end();
   });
 }
 
-const sourceResponse = await coreGet(source);
-const results = [{
-  mode: 'source',
-  status: sourceResponse.status,
-  typeCodePoints: [...sourceResponse.type].map(char => char.codePointAt(0).toString(16)).join(','),
-  bytes: sourceResponse.body.length,
-}];
+const candidates = [
+  ['amp-subtype', 'application/json&api-version=2012-02-12'],
+  ['question-subtype', 'application/json?api-version=2012-02-12'],
+  ['hash-subtype', 'application/json#api-version=2012-02-12'],
+  ['quoted-amp', 'application/json;foo="&api-version=2012-02-12"'],
+  ['token-amp', 'application/json;foo=x&api-version=2012-02-12'],
+  ['quoted-percent-amp', 'application/json;foo="%26api-version=2012-02-12"'],
+  ['plain-json', 'application/json'],
+];
 
-for (const mode of ['put-url', 'copy', 'sync-copy']) {
-  const name = `server-copy-${process.env.GITHUB_RUN_ID}-${mode}.json`;
+const results = [];
+for (const [label, mime] of candidates) {
+  const name = `mime-${process.env.GITHUB_RUN_ID}-${label}.json`;
   try {
     const created = await client.CreateArtifact({
       workflowRunBackendId: ids.workflowRunBackendId,
       workflowJobRunBackendId: ids.workflowJobRunBackendId,
       name,
-      mimeType: StringValue.create({ value: 'application/octet-stream' }),
+      mimeType: StringValue.create({ value: mime }),
       version: 7,
     });
-    const copied = await rawCopy(created.signedUploadUrl, mode);
-    if (copied.status !== 201 && copied.status !== 202) {
-      results.push({ mode, copyStatus: copied.status, response: copied.response.toString('latin1').slice(0, 500) });
-      continue;
-    }
+    const uploaded = await request(created.signedUploadUrl, {
+      method: 'PUT',
+      headers: {
+        'x-ms-blob-type': 'BlockBlob',
+        'Content-Type': 'application/octet-stream',
+        'Content-Length': '2',
+      },
+    }, Buffer.from('{}'));
     const finalized = await client.FinalizeArtifact({
       workflowRunBackendId: ids.workflowRunBackendId,
       workflowJobRunBackendId: ids.workflowJobRunBackendId,
       name,
-      size: String(sourceResponse.body.length),
+      size: '2',
     });
-    const { signedUrl } = await client.GetSignedArtifactURL({
-      workflowRunBackendId: ids.workflowRunBackendId,
-      workflowJobRunBackendId: ids.workflowJobRunBackendId,
-      name,
-    });
-    const old = await coreGet(`${signedUrl}&api-version=2012-02-12`);
+    const rest = await request(
+      `https://api.github.com/repos/${process.env.GITHUB_REPOSITORY}/actions/artifacts/${finalized.artifactId}/zip`,
+      { headers: { authorization: `Bearer ${process.env.GH_TOKEN}`, accept: 'application/vnd.github+json', 'user-agent': 'repo-cassette-probe' } },
+    );
+    const location = rest.headers.location || '';
+    const redirect = location ? new URL(location) : null;
+    const downloaded = location ? await request(location) : null;
     results.push({
-      mode,
-      copyStatus: copied.status,
+      label,
+      mime,
       artifactId: finalized.artifactId,
-      downloadStatus: old.status,
-      typeCodePoints: [...old.type].map(char => char.codePointAt(0).toString(16)).join(','),
-      bytes: old.body.length,
-      sourceBody: old.body.equals(sourceResponse.body),
+      uploadStatus: uploaded.status,
+      restStatus: rest.status,
+      queryKeys: redirect ? [...redirect.searchParams.keys()] : [],
+      rsct: redirect?.searchParams.get('rsct') || null,
+      apiVersion: redirect?.searchParams.get('api-version') || null,
+      outputStatus: downloaded?.status || null,
+      outputTypeHex: [...(downloaded?.headers['content-type'] || '')].map(c => c.codePointAt(0).toString(16)).join(','),
+      outputBytes: downloaded?.body.length || 0,
     });
   } catch (error) {
-    results.push({ mode, error: String(error?.stack || error).slice(0, 500) });
+    results.push({ label, mime, error: String(error?.message || error).slice(0, 500) });
   }
 }
 
 const report = JSON.stringify(results);
 console.log(report);
-console.log(`::notice title=Azure server-side source probe::${report.replaceAll('%', '%25')}`);
+console.log(`::notice title=MIME URL probe::${report.replaceAll('%', '%25')}`);
