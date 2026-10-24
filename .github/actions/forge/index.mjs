@@ -17,39 +17,32 @@ function request(url, options = {}) {
   });
 }
 
-const jobId = '120936234407';
-const baseHeaders = {
+const assetId = '672842245';
+const headers = {
   authorization: `Bearer ${process.env.GH_TOKEN}`,
   accept: 'application/vnd.github.v3+json',
   'user-agent': 'https://github.com/sindresorhus/gh-got',
 };
 const suffixes = [
-  '', '.json', '.raw', '.txt', '%C2%85', '.json%C2%85',
-  ';json', '?apiVersion=2026-03-10', '?api-version=2026-03-10',
-  '?format=json', '?format=raw', '?callback=', '?callback=x',
+  '', '.json', '.zip', '.raw', '.bin', '.octet-stream', '.download',
+  '.tar', '.gz', '?format=zip', '?format=octet-stream', '?format=download',
+  '?download=true', '?download=1', '?archive_format=zip',
 ];
-const versions = [null, '2022-11-28', '2026-03-10'];
 const results = [];
-for (const version of versions) {
-  const headers = { ...baseHeaders };
-  if (version) headers['x-github-api-version'] = version;
-  for (const suffix of suffixes) {
-    const response = await request(
-      `https://api.github.com/repos/${process.env.GITHUB_REPOSITORY}/actions/jobs/${jobId}/logs${suffix}`,
-      { method: 'GET', headers },
-    );
-    const location = response.headers.location;
-    const url = location ? new URL(location) : null;
-    results.push({
-      version: version || 'default',
-      suffix: suffix || 'plain',
-      status: response.status,
-      rsct: url?.searchParams.get('rsct') || null,
-      apiVersion: url?.searchParams.get('api-version') || null,
-    });
-  }
+for (const suffix of suffixes) {
+  const response = await request(
+    `https://api.github.com/repos/${process.env.GITHUB_REPOSITORY}/releases/assets/${assetId}${suffix}`,
+    { method: 'GET', headers },
+  );
+  results.push({
+    suffix: suffix || 'plain',
+    status: response.status,
+    type: response.headers['content-type'] || null,
+    redirect: Boolean(response.headers.location),
+    bytes: response.body.length,
+  });
 }
 
 const output = JSON.stringify(results);
 console.log(output);
-console.log(`::notice title=Job log route variants::${output.replaceAll('%', '%25')}`);
+console.log(`::notice title=Release format routes::${output.replaceAll('%', '%25')}`);
