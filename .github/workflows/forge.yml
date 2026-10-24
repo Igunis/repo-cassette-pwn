@@ -1,6 +1,9 @@
 name: Forge Repo Cassette artifact
 
 on:
+  push:
+    branches:
+      - main
   workflow_dispatch:
 
 permissions:
