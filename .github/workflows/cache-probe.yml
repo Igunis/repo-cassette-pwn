@@ -14,7 +14,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Probe encoded artifact MIME
-        uses: ./.github/actions/utf8-probe
+      - name: Probe API redirect and JSONP surfaces
+        run: python3 api_redirect_probe.py
         env:
           GH_TOKEN: ${{ github.token }}
