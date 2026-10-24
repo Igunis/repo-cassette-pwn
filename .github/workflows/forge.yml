@@ -18,7 +18,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 24.22.1
-      - name: Inspect raw artifact headers
-        run: node .github/actions/forge/download-probe.mjs
+      - name: Probe artifact MIME query parameters
+        run: node .github/actions/forge/artifact-query-probe.mjs
         env:
           GH_TOKEN: ${{ github.token }}
