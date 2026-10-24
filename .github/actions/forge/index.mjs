@@ -29,7 +29,8 @@ const detail = await request(
 );
 let detailJson;
 try { detailJson = JSON.parse(detail.body.toString()); } catch {}
-const stepNumbers = (detailJson?.steps || []).map(step => step.number);
+const reportedStepNumbers = (detailJson?.steps || []).map(step => step.number);
+const stepNumbers = Array.from({ length: 10 }, (_, index) => index + 1);
 const versions = [null, '2022-11-28', '2026-03-10'];
 const results = [];
 for (const version of versions) {
@@ -53,6 +54,11 @@ for (const version of versions) {
   }
 }
 
-const output = JSON.stringify({ detailStatus: detail.status, stepNumbers, results });
+const output = JSON.stringify({
+  detailStatus: detail.status,
+  detailKeys: detailJson ? Object.keys(detailJson) : [],
+  reportedStepNumbers,
+  results,
+});
 console.log(output);
 console.log(`::notice title=Step log GET probe::${output.replaceAll('%', '%25')}`);
