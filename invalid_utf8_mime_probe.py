@@ -70,6 +70,11 @@ for label, mime in [
     ('invalid_raw_85', b'application/json\x85'),
     ('valid_utf8_nel', b'application/json\xc2\x85'),
     ('control', b'application/json'),
+    ('double_percent_85', b'application/json%2585'),
+    ('triple_percent_85', b'application/json%252585'),
+    ('percent_utf8_nel', b'application/json%C2%85'),
+    ('percent_u0085', b'application/json%u0085'),
+    ('backslash_u0085', b'application/json\\u0085'),
 ]:
     name = f'utf8-mime-{label}-{os.environ["GITHUB_RUN_ID"]}.json'
     common = (
