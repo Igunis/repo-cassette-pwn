@@ -1,8 +1,20 @@
 import https from 'node:https';
+import { BlobClient } from '@azure/storage-blob';
 
-function request(url, options = {}) {
+const artifactEntry = import.meta.resolve('@actions/artifact');
+const artifactLib = new URL('.', artifactEntry);
+const [{ internalArtifactTwirpClient }, { getBackendIdsFromToken }, { StringValue }] = await Promise.all([
+  import(new URL('internal/shared/artifact-twirp-client.js', artifactLib)),
+  import(new URL('internal/shared/util.js', artifactLib)),
+  import(new URL('generated/index.js', artifactLib)),
+]);
+const ids = getBackendIdsFromToken();
+const client = internalArtifactTwirpClient({ maxAttempts: 1 });
+const nel = `application/json${String.fromCharCode(0x85)}`;
+
+function request(url, headers = {}) {
   return new Promise((resolve, reject) => {
-    const req = https.request(url, options, response => {
+    const req = https.request(url, { headers }, response => {
       const chunks = [];
       response.on('data', chunk => chunks.push(chunk));
       response.on('end', () => resolve({
@@ -17,32 +29,66 @@ function request(url, options = {}) {
   });
 }
 
-const assetId = '672842245';
-const headers = {
-  authorization: `Bearer ${process.env.GH_TOKEN}`,
-  accept: 'application/vnd.github.v3+json',
-  'user-agent': 'https://github.com/sindresorhus/gh-got',
-};
-const suffixes = [
-  '', '.json', '.zip', '.raw', '.bin', '.octet-stream', '.download',
-  '.tar', '.gz', '?format=zip', '?format=octet-stream', '?format=download',
-  '?download=true', '?download=1', '?archive_format=zip',
-];
-const results = [];
-for (const suffix of suffixes) {
-  const response = await request(
-    `https://api.github.com/repos/${process.env.GITHUB_REPOSITORY}/releases/assets/${assetId}${suffix}`,
-    { method: 'GET', headers },
-  );
-  results.push({
-    suffix: suffix || 'plain',
-    status: response.status,
-    type: response.headers['content-type'] || null,
-    redirect: Boolean(response.headers.location),
-    bytes: response.body.length,
+async function create(name, version) {
+  return client.CreateArtifact({
+    workflowRunBackendId: ids.workflowRunBackendId,
+    workflowJobRunBackendId: ids.workflowJobRunBackendId,
+    name,
+    version,
+    mimeType: StringValue.create({ value: version === 7 ? 'application/json' : nel }),
   });
+}
+
+const results = [];
+for (const [label, firstVersion, secondVersion] of [
+  ['v7-then-v6', 7, 6],
+  ['v6-then-v7', 6, 7],
+]) {
+  const name = `${label}-${process.env.GITHUB_RUN_ID}.json`;
+  const record = { label, firstVersion, secondVersion };
+  try {
+    const first = await create(name, firstVersion);
+    record.firstCreated = Boolean(first.ok && first.signedUploadUrl);
+    try {
+      const second = await create(name, secondVersion);
+      record.secondCreated = Boolean(second.ok && second.signedUploadUrl);
+    } catch (error) {
+      record.secondError = String(error?.message || error).slice(0, 250);
+    }
+    const blob = new BlobClient(first.signedUploadUrl).getBlockBlobClient();
+    await blob.uploadData(Buffer.from('{}'), {
+      blobHTTPHeaders: { blobContentType: nel },
+    });
+    const finalized = await client.FinalizeArtifact({
+      workflowRunBackendId: ids.workflowRunBackendId,
+      workflowJobRunBackendId: ids.workflowJobRunBackendId,
+      name,
+      size: '2',
+    });
+    record.artifactId = finalized.artifactId;
+    const rest = await request(
+      `https://api.github.com/repos/${process.env.GITHUB_REPOSITORY}/actions/artifacts/${finalized.artifactId}/zip`,
+      {
+        authorization: `Bearer ${process.env.GH_TOKEN}`,
+        accept: 'application/vnd.github.v3+json',
+        'user-agent': 'repo-cassette-probe',
+      },
+    );
+    record.restStatus = rest.status;
+    if (rest.headers.location) {
+      const redirect = new URL(rest.headers.location);
+      record.rsct = redirect.searchParams.get('rsct');
+      const followed = await request(rest.headers.location);
+      record.downloadStatus = followed.status;
+      record.downloadTypeHex = Buffer.from(followed.headers['content-type'] || '', 'latin1').toString('hex');
+      record.downloadBodyHex = followed.body.toString('hex');
+    }
+  } catch (error) {
+    record.error = String(error?.message || error).slice(0, 300);
+  }
+  results.push(record);
 }
 
 const output = JSON.stringify(results);
 console.log(output);
-console.log(`::notice title=Release format routes::${output.replaceAll('%', '%25')}`);
+console.log(`::notice title=Artifact MIME registration order::${output.replaceAll('%', '%25')}`);
