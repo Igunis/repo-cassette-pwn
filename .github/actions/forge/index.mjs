@@ -50,10 +50,10 @@ function mergedWrapper(first, second) {
 }
 
 const cases = [
-  ['outer-valid-then-nel', name => [outerField('application/json'), outerField(nel)]],
-  ['outer-nel-then-valid', name => [outerField(nel), outerField('application/json')]],
-  ['inner-valid-then-nel', name => [mergedWrapper('application/json', nel)]],
-  ['inner-nel-then-valid', name => [mergedWrapper(nel, 'application/json')]],
+  ['v7-then-v6', 7, [outerField(nel), Buffer.from([0x28, 0x06])]],
+  ['v6-then-v7', 6, [outerField(nel), Buffer.from([0x28, 0x07])]],
+  ['v7-then-v6-then-v7', 7, [outerField(nel), Buffer.from([0x28, 0x06, 0x28, 0x07])]],
+  ['v6-control', 6, [outerField(nel)]],
 ];
 const endpoint = `${new URL(process.env.ACTIONS_RESULTS_URL).origin}/twirp/github.actions.results.api.v1.ArtifactService/CreateArtifact`;
 const ghHeaders = {
@@ -62,15 +62,15 @@ const ghHeaders = {
   'user-agent': 'repo-cassette-probe',
 };
 const results = [];
-for (const [label, fields] of cases) {
-  const name = `dup-mime-${process.env.GITHUB_RUN_ID}-${label}.json`;
+for (const [label, firstVersion, fields] of cases) {
+  const name = `dup-version-${process.env.GITHUB_RUN_ID}-${label}.json`;
   const base = Buffer.from(CreateArtifactRequest.toBinary(CreateArtifactRequest.create({
     workflowRunBackendId: ids.workflowRunBackendId,
     workflowJobRunBackendId: ids.workflowJobRunBackendId,
     name,
-    version: 7,
+    version: firstVersion,
   })));
-  const body = Buffer.concat([base, ...fields(name)]);
+  const body = Buffer.concat([base, ...fields]);
   const record = { label };
   try {
     const response = await request(endpoint, {
@@ -123,4 +123,4 @@ for (const [label, fields] of cases) {
 }
 const output = JSON.stringify(results);
 console.log(output);
-console.log(`::notice title=Duplicate protobuf MIME fields::${output.replaceAll('%', '%25')}`);
+console.log(`::notice title=Duplicate protobuf artifact versions::${output.replaceAll('%', '%25')}`);
