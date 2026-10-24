@@ -42,8 +42,8 @@ try {
     workflowRunBackendId: ids.workflowRunBackendId,
     workflowJobRunBackendId: ids.workflowJobRunBackendId,
     name,
-    mimeType: StringValue.create({ value: contentType }),
-    version: 6,
+    mimeType: StringValue.create({ value: 'application/octet-stream' }),
+    version: 7,
   });
   if (!created.ok || !created.signedUploadUrl) throw new Error('CreateArtifact failed');
 
