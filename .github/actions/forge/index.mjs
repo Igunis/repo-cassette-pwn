@@ -206,10 +206,12 @@ for (const candidate of redirectPaths) {
 }
 const completedJobId = '120933913998';
 const stepLogResults = [];
+const defaultVersionHeaders = { ...apiHeaders };
+delete defaultVersionHeaders['x-github-api-version'];
 for (let step = 1; step <= 9; step++) {
   const response = await request(
     `https://api.github.com/repos/${process.env.GITHUB_REPOSITORY}/actions/jobs/${completedJobId}/steps/${step}/logs`,
-    { method: 'HEAD', headers: apiHeaders },
+    { method: 'HEAD', headers: defaultVersionHeaders },
   );
   const location = response.headers.location;
   const url = location ? new URL(location) : null;
