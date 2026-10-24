@@ -30,6 +30,7 @@ const asset = `${repo}/releases/assets/672783444`;
 const blob = `${repo}/git/blobs/e53bff38de42bdecabfb067d645193b018ece134`;
 const attachment = `${root}/internal/user-attachments/assets/1b198410-a9ee-4fc7-9bac-1f3bf86ad6b8`;
 const file = `${root}/internal/user-attachments/files/33385773/strata-iq3_xss_pub.json`;
+const artifact = `${repo}/actions/artifacts/12569682558`;
 const cases = [
   ['release-normal', asset],
   ['release-raw', `${asset}?raw=1`],
@@ -60,9 +61,17 @@ const cases = [
   ['file-raw-query', `${file}?raw=1`],
   ['file-download-query', `${file}?download=1`],
   ['file-raw-suffix', `${file}/raw`],
+  ['artifact-zip', `${artifact}/zip`],
+  ['artifact-raw', `${artifact}/raw`],
+  ['artifact-json', `${artifact}/json`],
+  ['artifact-tar', `${artifact}/tar`],
+  ['artifact-dot-json', `${artifact}/zip.json`],
+  ['artifact-zip-upper', `${artifact}/ZIP`],
+  ['artifact-zip-semicolon', `${artifact}/zip;raw`],
+  ['artifact-zip-query', `${artifact}/zip?archive_format=raw`],
 ];
 
-const results = await Promise.all(cases.filter(([label]) => label.startsWith('file-') || label === 'attachment-normal').map(async ([label, url]) => {
+const results = await Promise.all(cases.filter(([label]) => label.startsWith('artifact-')).map(async ([label, url]) => {
   try {
     const res = await get(url);
     const row = {
