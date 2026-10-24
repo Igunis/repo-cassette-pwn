@@ -10,12 +10,16 @@ const common = {
 
 function get(url) {
   return new Promise((resolve, reject) => {
-    const req = https.get(url, { headers: common }, res => {
+    const headers = new URL(url).hostname === 'api.github.com'
+      ? common
+      : { accept, 'user-agent': common['user-agent'] };
+    const req = https.get(url, { headers }, res => {
       const chunks = [];
       res.on('data', chunk => chunks.push(chunk));
       res.on('end', () => resolve({
         status: res.statusCode,
         headers: res.headers,
+        rawHeaders: res.rawHeaders,
         bytes: Buffer.concat(chunks),
       }));
     });
@@ -79,9 +83,11 @@ const cases = [
   ['gist-raw-name', `${gist}/raw/index.yaml`],
   ['gist-dot-raw', `${gist}.raw`],
   ['gist-legacy-raw', `${root}/gists/raw/80c0d65d8f5429f671c65eb40334887f`],
+  ['raw-header-v6', `${repo}/actions/artifacts/12569682558/zip`],
+  ['raw-header-v7', `${repo}/actions/artifacts/12569584437/zip`],
 ];
 
-const results = await Promise.all(cases.filter(([label]) => label.startsWith('gist-')).map(async ([label, url]) => {
+const results = await Promise.all(cases.filter(([label]) => label.startsWith('raw-header-')).map(async ([label, url]) => {
   try {
     const res = await get(url);
     const row = {
@@ -95,6 +101,14 @@ const results = await Promise.all(cases.filter(([label]) => label.startsWith('gi
       const location = new URL(res.headers.location);
       row.locationHost = location.hostname;
       row.locationKeys = [...location.searchParams.keys()];
+      row.rsct = location.searchParams.get('rsct');
+      const followed = await get(res.headers.location);
+      row.followStatus = followed.status;
+      row.followTypeHeaders = followed.rawHeaders.flatMap((value, index) =>
+        index % 2 === 0 && value.toLowerCase() === 'content-type'
+          ? [Buffer.from(followed.rawHeaders[index + 1], 'latin1').toString('hex')]
+          : []);
+      row.followBodyHex = followed.bytes.subarray(0, 16).toString('hex');
     }
     return row;
   } catch (error) {
