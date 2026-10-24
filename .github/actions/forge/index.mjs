@@ -1,5 +1,4 @@
 import https from 'node:https';
-import { createHash } from 'node:crypto';
 
 function request(url, headers = {}) {
   return new Promise((resolve, reject) => {
@@ -19,43 +18,59 @@ function request(url, headers = {}) {
 }
 
 const uuid = '1b198410-a9ee-4fc7-9bac-1f3bf86ad6b8';
+const base = `https://api.github.com/internal/user-attachments/assets/${uuid}`;
 const fixedAccept = 'application/vnd.github.v3+json';
 const userAgent = 'https://github.com/sindresorhus/gh-got';
 const variants = [
-  ['internal-auth-fixed', `/internal/user-attachments/assets/${uuid}`, true, fixedAccept],
-  ['internal-anon-fixed', `/internal/user-attachments/assets/${uuid}`, false, fixedAccept],
-  ['internal-auth-any', `/internal/user-attachments/assets/${uuid}`, true, '*/*'],
-  ['internal-auth-download', `/internal/user-attachments/assets/${uuid}/download`, true, fixedAccept],
-  ['public-auth-fixed', `/user-attachments/assets/${uuid}`, true, fixedAccept],
+  ['normal', base, fixedAccept],
+  ['accept-octet', base, 'application/octet-stream'],
+  ['raw-1', `${base}?raw=1`, fixedAccept],
+  ['download-1', `${base}?download=1`, fixedAccept],
+  ['redirect-true', `${base}?redirect=true`, fixedAccept],
+  ['format-raw', `${base}?format=raw`, fixedAccept],
+  ['mode-redirect', `${base}?mode=redirect`, fixedAccept],
+  ['response-type-raw', `${base}?response_type=raw`, fixedAccept],
+  ['direct-1', `${base}?direct=1`, fixedAccept],
+  ['alt-media', `${base}?alt=media`, fixedAccept],
+  ['suffix-raw', `${base}/raw`, fixedAccept],
+  ['suffix-blob', `${base}/blob`, fixedAccept],
 ];
 const results = [];
-for (const [label, path, auth, accept] of variants) {
+for (const [label, url, accept] of variants) {
   const record = { label };
   try {
-    const headers = { accept, 'user-agent': userAgent };
-    if (auth) headers.authorization = `token ${process.env.GH_TOKEN}`;
-    const first = await request(`https://api.github.com${path}`, headers);
+    const first = await request(url, {
+      authorization: `token ${process.env.GH_TOKEN}`,
+      accept,
+      'user-agent': userAgent,
+    });
     record.status = first.status;
     record.typeHex = Buffer.from(first.headers['content-type'] || '', 'latin1').toString('hex');
     record.bytes = first.body.length;
-    record.prefix = first.body.subarray(0, 80).toString('utf8');
     if (first.headers.location) {
       const redirect = new URL(first.headers.location);
-      record.redirectHost = redirect.hostname;
-      record.redirectPath = redirect.pathname;
-      record.redirectKeys = [...redirect.searchParams.keys()];
+      record.locationHost = redirect.hostname;
+      record.locationKeys = [...redirect.searchParams.keys()];
       const followed = await request(first.headers.location, { accept, 'user-agent': userAgent });
-      record.finalStatus = followed.status;
-      record.finalTypeHex = Buffer.from(followed.headers['content-type'] || '', 'latin1').toString('hex');
-      record.finalBytes = followed.body.length;
-      record.finalSha12 = createHash('sha256').update(followed.body).digest('hex').slice(0, 12);
-      record.finalPrefixHex = followed.body.subarray(0, 12).toString('hex');
+      record.followStatus = followed.status;
+      record.followTypeHex = Buffer.from(followed.headers['content-type'] || '', 'latin1').toString('hex');
+      record.followPrefixHex = followed.body.subarray(0, 10).toString('hex');
+    } else {
+      try {
+        const body = JSON.parse(first.body.toString('utf8'));
+        record.keys = Object.keys(body);
+        record.urlHost = typeof body.url === 'string' ? new URL(body.url).hostname : null;
+        record.contentType = body.content_type || body.contentType || null;
+        record.name = body.name || null;
+      } catch {
+        record.prefix = first.body.subarray(0, 80).toString('utf8');
+      }
     }
   } catch (error) {
-    record.error = String(error?.message || error).slice(0, 150);
+    record.error = String(error?.message || error).slice(0, 130);
   }
   results.push(record);
 }
 const output = JSON.stringify(results);
 console.log(output);
-console.log(`::notice title=Internal attachment API route probe::${output.replaceAll('%', '%25')}`);
+console.log(`::notice title=Internal attachment direct modes::${output.replaceAll('%', '%25')}`);
