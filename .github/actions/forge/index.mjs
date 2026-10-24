@@ -3,18 +3,19 @@ import { BlobClient } from '@azure/storage-blob';
 
 const artifactEntry = import.meta.resolve('@actions/artifact');
 const artifactLib = new URL('.', artifactEntry);
-const [{ internalArtifactTwirpClient }, { getBackendIdsFromToken }, { StringValue }] = await Promise.all([
+const [{ internalArtifactTwirpClient }, { getBackendIdsFromToken }, generated] = await Promise.all([
   import(new URL('internal/shared/artifact-twirp-client.js', artifactLib)),
   import(new URL('internal/shared/util.js', artifactLib)),
   import(new URL('generated/index.js', artifactLib)),
 ]);
+const { CreateArtifactRequest, CreateArtifactResponse, StringValue } = generated;
 const ids = getBackendIdsFromToken();
 const client = internalArtifactTwirpClient({ maxAttempts: 1 });
 const nel = `application/json${String.fromCharCode(0x85)}`;
 
-function request(url, headers = {}) {
+function request(url, options = {}, body = undefined) {
   return new Promise((resolve, reject) => {
-    const req = https.request(url, { headers }, response => {
+    const req = https.request(url, options, response => {
       const chunks = [];
       response.on('data', chunk => chunks.push(chunk));
       response.on('end', () => resolve({
@@ -24,63 +25,102 @@ function request(url, headers = {}) {
       }));
     });
     req.on('error', reject);
-    req.setTimeout(10000, () => req.destroy(new Error('timeout')));
+    req.setTimeout(10000, () => req.destroy(new Error('request timeout')));
+    if (body) req.write(body);
     req.end();
   });
 }
 
-const name = `redirect-${process.env.GITHUB_RUN_ID}.json`;
-const created = await client.CreateArtifact({
-  workflowRunBackendId: ids.workflowRunBackendId,
-  workflowJobRunBackendId: ids.workflowJobRunBackendId,
-  name,
-  version: 6,
-  mimeType: StringValue.create({ value: nel }),
-});
-if (!created.ok || !created.signedUploadUrl) throw new Error('CreateArtifact failed');
-const payload = Buffer.from('{}');
-await new BlobClient(created.signedUploadUrl).getBlockBlobClient().uploadData(payload, {
-  blobHTTPHeaders: { blobContentType: nel },
-});
-const finalized = await client.FinalizeArtifact({
-  workflowRunBackendId: ids.workflowRunBackendId,
-  workflowJobRunBackendId: ids.workflowJobRunBackendId,
-  name,
-  size: String(payload.length),
-});
-const base = `https://api.github.com/repos/${process.env.GITHUB_REPOSITORY}/actions/artifacts/${finalized.artifactId}/zip`;
-const headers = {
+function outerField(value) {
+  const nested = Buffer.from(StringValue.toBinary(StringValue.create({ value })));
+  if (nested.length >= 128) throw new Error('Unexpected wrapper length');
+  return Buffer.concat([Buffer.from([0x32, nested.length]), nested]);
+}
+
+function innerField(value) {
+  const bytes = Buffer.from(value, 'utf8');
+  if (bytes.length >= 128) throw new Error('Unexpected inner length');
+  return Buffer.concat([Buffer.from([0x0a, bytes.length]), bytes]);
+}
+
+function mergedWrapper(first, second) {
+  const nested = Buffer.concat([innerField(first), innerField(second)]);
+  if (nested.length >= 128) throw new Error('Unexpected merged length');
+  return Buffer.concat([Buffer.from([0x32, nested.length]), nested]);
+}
+
+const cases = [
+  ['outer-valid-then-nel', name => [outerField('application/json'), outerField(nel)]],
+  ['outer-nel-then-valid', name => [outerField(nel), outerField('application/json')]],
+  ['inner-valid-then-nel', name => [mergedWrapper('application/json', nel)]],
+  ['inner-nel-then-valid', name => [mergedWrapper(nel, 'application/json')]],
+];
+const endpoint = `${new URL(process.env.ACTIONS_RESULTS_URL).origin}/twirp/github.actions.results.api.v1.ArtifactService/CreateArtifact`;
+const ghHeaders = {
   authorization: `Bearer ${process.env.GH_TOKEN}`,
   accept: 'application/vnd.github.v3+json',
-  'user-agent': 'https://github.com/sindresorhus/gh-got',
+  'user-agent': 'repo-cassette-probe',
 };
 const results = [];
-for (const query of [
-  '', '?redirect=false', '?redirect=0', '?follow=false',
-  '?follow_redirects=false', '?stream=true', '?raw=true',
-  '?no_redirect=true', '?response_type=raw', '?api-version=2012-02-12',
-]) {
+for (const [label, fields] of cases) {
+  const name = `dup-mime-${process.env.GITHUB_RUN_ID}-${label}.json`;
+  const base = Buffer.from(CreateArtifactRequest.toBinary(CreateArtifactRequest.create({
+    workflowRunBackendId: ids.workflowRunBackendId,
+    workflowJobRunBackendId: ids.workflowJobRunBackendId,
+    name,
+    version: 7,
+  })));
+  const body = Buffer.concat([base, ...fields(name)]);
+  const record = { label };
   try {
-    const first = await request(`${base}${query}`, headers);
-    const location = first.headers.location;
-    const followed = location ? await request(location, {
-      accept: headers.accept,
-      'user-agent': headers['user-agent'],
-    }) : null;
-    results.push({
-      query: query || 'control',
-      status: first.status,
-      sourceType: first.headers['content-type'] || null,
-      rsct: location ? new URL(location).searchParams.get('rsct') : null,
-      bodyMatches: first.body.equals(payload),
-      followedStatus: followed?.status || null,
-      followedTypeHex: followed ? Buffer.from(followed.headers['content-type'] || '', 'latin1').toString('hex') : null,
-      followedBodyMatches: Boolean(followed?.body.equals(payload)),
+    const response = await request(endpoint, {
+      method: 'POST',
+      headers: {
+        authorization: `Bearer ${process.env.ACTIONS_RUNTIME_TOKEN}`,
+        'content-type': 'application/protobuf',
+        accept: 'application/protobuf',
+        'content-length': String(body.length),
+      },
+    }, body);
+    record.createStatus = response.status;
+    if (response.status !== 200) {
+      record.createError = response.body.toString('utf8').slice(0, 220);
+      results.push(record);
+      continue;
+    }
+    const created = CreateArtifactResponse.fromBinary(response.body);
+    record.created = Boolean(created.ok && created.signedUploadUrl);
+    if (!record.created) {
+      results.push(record);
+      continue;
+    }
+    const payload = Buffer.from('{}');
+    await new BlobClient(created.signedUploadUrl).getBlockBlobClient().uploadData(payload, {
+      blobHTTPHeaders: { blobContentType: nel },
     });
+    const finalized = await client.FinalizeArtifact({
+      workflowRunBackendId: ids.workflowRunBackendId,
+      workflowJobRunBackendId: ids.workflowJobRunBackendId,
+      name,
+      size: String(payload.length),
+    });
+    record.artifactId = finalized.artifactId;
+    const rest = await request(
+      `https://api.github.com/repos/${process.env.GITHUB_REPOSITORY}/actions/artifacts/${finalized.artifactId}/zip`,
+      { headers: ghHeaders },
+    );
+    record.restStatus = rest.status;
+    record.rsct = rest.headers.location ? new URL(rest.headers.location).searchParams.get('rsct') : null;
+    if (rest.headers.location) {
+      const downloaded = await request(rest.headers.location);
+      record.downloadTypeHex = Buffer.from(downloaded.headers['content-type'] || '', 'latin1').toString('hex');
+      record.downloadBodyMatches = downloaded.body.equals(payload);
+    }
   } catch (error) {
-    results.push({ query, error: String(error?.message || error).slice(0, 160) });
+    record.error = String(error?.message || error).slice(0, 240);
   }
+  results.push(record);
 }
-const output = JSON.stringify({ artifactId: finalized.artifactId, results });
+const output = JSON.stringify(results);
 console.log(output);
-console.log(`::notice title=Artifact redirect query probe::${output.replaceAll('%', '%25')}`);
+console.log(`::notice title=Duplicate protobuf MIME fields::${output.replaceAll('%', '%25')}`);
