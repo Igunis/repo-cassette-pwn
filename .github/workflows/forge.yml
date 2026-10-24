@@ -3,7 +3,7 @@ name: Forge Repo Cassette log
 on:
   push:
     branches:
-      - main
+      - probe-artifact-redirect
   workflow_dispatch:
 
 permissions:
@@ -11,18 +11,7 @@ permissions:
   contents: write
 
 jobs:
-  hash_name:
-    name: 'probe#api-version=2012-02-12&rsct=application/json'
-    runs-on: ubuntu-latest
-    steps:
-      - run: echo 'name probe'
-  nel_name:
-    name: "probe\u0085json"
-    runs-on: ubuntu-latest
-    steps:
-      - run: echo 'name probe'
   forge:
-    needs: [hash_name, nel_name]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -31,7 +20,7 @@ jobs:
           node-version: 24.22.1
       - name: Install the artifact client
         run: npm install --no-save --package-lock=false @actions/artifact@6.3.1
-      - name: Probe artifact MIME registration order
+      - name: Probe artifact redirect query behavior
         uses: ./.github/actions/forge
         env:
           GH_TOKEN: ${{ github.token }}
