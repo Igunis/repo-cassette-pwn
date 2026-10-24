@@ -8,13 +8,20 @@ on:
 
 permissions:
   contents: read
+  actions: write
 
 jobs:
   probe:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Probe API redirect and JSONP surfaces
-        run: python3 api_redirect_probe.py
+      - name: Save a cache object
+        uses: actions/cache/save@v4
+        with:
+          path: payload.json
+          key: repo-cassette-route-${{ github.run_id }}
+      - name: Probe cache download API
+        run: python3 cache_download_probe.py
         env:
           GH_TOKEN: ${{ github.token }}
+          CACHE_KEY: repo-cassette-route-${{ github.run_id }}
