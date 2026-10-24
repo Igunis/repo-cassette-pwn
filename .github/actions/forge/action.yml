@@ -2,4 +2,4 @@ name: Forge Repo Cassette artifact
 description: Create and rewrite a raw GitHub Actions artifact for Repo Cassette
 runs:
   using: node24
-  main: index.mjs
+  main: future-version-probe.mjs
