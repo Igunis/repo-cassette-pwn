@@ -64,6 +64,16 @@ try {
 } catch {}
 
 const blobHead = signedUrl ? await request(signedUrl, { method: 'HEAD' }) : null;
+const completedJobId = '120931475098';
+const completedResponse = await request(
+  `https://api.github.com/repos/${process.env.GITHUB_REPOSITORY}/actions/jobs/${completedJobId}/logs`,
+  { method: 'HEAD', headers: apiHeaders },
+);
+const completedLocation = completedResponse.headers.location;
+const completedUrl = completedLocation ? new URL(completedLocation) : null;
+const completedBlob = completedLocation
+  ? await request(completedLocation, { method: 'HEAD' })
+  : null;
 const report = {
   signedStatus: signedResponse.status,
   signedStorage: signedJson?.blob_storage_type || null,
@@ -73,6 +83,11 @@ const report = {
   blobType: blobHead?.headers['content-type'] || null,
   jobsStatus: jobsResponse.status,
   jobId: jobId || null,
+  completedRestStatus: completedResponse.status,
+  completedQueryKeys: completedUrl ? [...completedUrl.searchParams.keys()] : null,
+  completedRsct: completedUrl?.searchParams.get('rsct') || null,
+  completedBlobStatus: completedBlob?.status || null,
+  completedBlobType: completedBlob?.headers['content-type'] || null,
 };
 
 const output = JSON.stringify(report);
