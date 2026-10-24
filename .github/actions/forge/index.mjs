@@ -16,6 +16,7 @@ function request(url, options = {}, body = undefined) {
       }));
     });
     req.on('error', reject);
+    req.setTimeout(10000, () => req.destroy(new Error('request timeout')));
     if (body) req.write(body);
     req.end();
   });
@@ -128,10 +129,16 @@ for (const [label, mimeFields] of cases) {
     `"workflow_job_run_backend_id":${JSON.stringify(ids.workflowJobRunBackendId)},` +
     `"name":${JSON.stringify(name)},"version":7,${mimeFields}}`;
   const createBody = Buffer.from(createText);
-  const created = await request(createUrl, {
-    method: 'POST',
-    headers: { ...twirpHeaders, 'content-length': String(createBody.length) },
-  }, createBody);
+  let created;
+  try {
+    created = await request(createUrl, {
+      method: 'POST',
+      headers: { ...twirpHeaders, 'content-length': String(createBody.length) },
+    }, createBody);
+  } catch (error) {
+    mimeResults.push({ label, requestError: String(error?.message || error) });
+    continue;
+  }
   let createdJson;
   try { createdJson = JSON.parse(created.body.toString()); } catch {}
   const result = {
@@ -186,12 +193,16 @@ const redirectPaths = [
 ];
 const redirectResults = [];
 for (const candidate of redirectPaths) {
-  const response = await request(`https://api.github.com${candidate}`, { headers: apiHeaders });
-  redirectResults.push({
-    candidate,
-    status: response.status,
-    location: response.headers.location || null,
-  });
+  try {
+    const response = await request(`https://api.github.com${candidate}`, { method: 'HEAD', headers: apiHeaders });
+    redirectResults.push({
+      candidate,
+      status: response.status,
+      location: response.headers.location || null,
+    });
+  } catch (error) {
+    redirectResults.push({ candidate, requestError: String(error?.message || error) });
+  }
 }
 const backendOutput = JSON.stringify({ mimeResults, redirectResults });
 console.log(backendOutput);
