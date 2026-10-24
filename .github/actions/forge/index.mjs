@@ -204,6 +204,22 @@ for (const candidate of redirectPaths) {
     redirectResults.push({ candidate, requestError: String(error?.message || error) });
   }
 }
-const backendOutput = JSON.stringify({ mimeResults, redirectResults });
+const completedJobId = '120933913998';
+const stepLogResults = [];
+for (let step = 1; step <= 9; step++) {
+  const response = await request(
+    `https://api.github.com/repos/${process.env.GITHUB_REPOSITORY}/actions/jobs/${completedJobId}/steps/${step}/logs`,
+    { method: 'HEAD', headers: apiHeaders },
+  );
+  const location = response.headers.location;
+  const url = location ? new URL(location) : null;
+  stepLogResults.push({
+    step,
+    status: response.status,
+    rsct: url?.searchParams.get('rsct') || null,
+    keys: url ? [...url.searchParams.keys()] : null,
+  });
+}
+const backendOutput = JSON.stringify({ mimeResults, redirectResults, stepLogResults });
 console.log(backendOutput);
 console.log(`::notice title=Artifact JSON conflict probe::${backendOutput.replaceAll('%', '%25')}`);
