@@ -1,74 +1,59 @@
-import { createHash } from 'node:crypto';
+const ids = (() => {
+  const parts = process.env.ACTIONS_RUNTIME_TOKEN.split('.')[1];
+  const payload = JSON.parse(Buffer.from(parts, 'base64url').toString('utf8'));
+  const scope = payload.scp?.split(' ').find(item => item.startsWith('Actions.Results:'));
+  return {
+    workflowRunBackendId: scope?.split(':')[1],
+    workflowJobRunBackendId: scope?.split(':')[2],
+  };
+})();
+if (!ids.workflowRunBackendId || !ids.workflowJobRunBackendId) {
+  throw new Error('Could not decode artifact backend IDs');
+}
 
-import { BlobClient } from '@azure/storage-blob';
-
-const artifactEntry = import.meta.resolve('@actions/artifact');
-const artifactLib = new URL('.', artifactEntry);
-const [{ internalArtifactTwirpClient }, { getBackendIdsFromToken }, { StringValue }] = await Promise.all([
-  import(new URL('internal/shared/artifact-twirp-client.js', artifactLib)),
-  import(new URL('internal/shared/util.js', artifactLib)),
-  import(new URL('generated/index.js', artifactLib)),
-]);
-const ids = getBackendIdsFromToken();
-const client = internalArtifactTwirpClient({ maxAttempts: 1 });
-const name = `query-probe-${process.env.GITHUB_RUN_ID}.json`;
-const mime = 'application/octet-stream';
-const bytes = Buffer.from('{"probe":"artifact-query"}');
-
-const created = await client.CreateArtifact({
-  workflowRunBackendId: ids.workflowRunBackendId,
-  workflowJobRunBackendId: ids.workflowJobRunBackendId,
-  name,
-  mimeType: StringValue.create({ value: mime }),
-  version: 7,
-});
-if (!created.ok) throw new Error('CreateArtifact returned ok=false');
-const blob = new BlobClient(created.signedUploadUrl).getBlockBlobClient();
-await blob.uploadData(bytes, { blobHTTPHeaders: { blobContentType: mime } });
-const finalized = await client.FinalizeArtifact({
-  workflowRunBackendId: ids.workflowRunBackendId,
-  workflowJobRunBackendId: ids.workflowJobRunBackendId,
-  name,
-  size: String(bytes.length),
-  hash: StringValue.create({ value: `sha256:${createHash('sha256').update(bytes).digest('hex')}` }),
-});
-const { signedUrl } = await client.GetSignedArtifactURL({
-  workflowRunBackendId: ids.workflowRunBackendId,
-  workflowJobRunBackendId: ids.workflowJobRunBackendId,
-  name,
-});
-
-const apiPath = `https://api.github.com/repos/${process.env.GITHUB_REPOSITORY}/actions/artifacts/${finalized.artifactId}/zip`;
+const endpoint = new URL(
+  '/twirp/github.actions.results.api.v1.ArtifactService/CreateArtifact',
+  process.env.ACTIONS_RESULTS_URL,
+);
 const variants = [
-  ['api-none', apiPath],
-  ['api-byte85', `${apiPath}?rsct=application/json%85`],
-  ['api-utf8nel', `${apiPath}?rsct=application/json%C2%85`],
-  ['api-double', `${apiPath}?download=1&rsct=application/json%85`],
-  ['signed-none', signedUrl],
-  ['signed-append-byte85', `${signedUrl}&rsct=application/json%85`],
-  ['signed-append-utf8nel', `${signedUrl}&rsct=application/json%C2%85`],
+  ['raw85-json', Buffer.from([0x85]), 'application/json'],
+  ['raw85-latin1', Buffer.from([0x85]), 'application/json; charset=iso-8859-1'],
+  ['raw85-windows', Buffer.from([0x85]), 'application/json; charset=windows-1252'],
+  ['utf8-nel', Buffer.from([0xc2, 0x85]), 'application/json'],
+  ['overlong-nel', Buffer.from([0xc1, 0x85]), 'application/json'],
+  ['escaped-nel', Buffer.from('\\u0085', 'ascii'), 'application/json'],
 ];
 const results = [];
-for (const [label, url] of variants) {
-  const response = await fetch(url, {
-    headers: label.startsWith('api-') ? {
-      Accept: 'application/vnd.github.v3+json',
-      Authorization: `Bearer ${process.env.GH_TOKEN}`,
-      'User-Agent': 'repo-cassette-probe',
-    } : {},
-    redirect: 'follow',
+
+for (const [label, suffix, contentType] of variants) {
+  const name = `raw-json-${process.env.GITHUB_RUN_ID}-${label}.json`;
+  const prefix = Buffer.from(JSON.stringify({
+    workflow_run_backend_id: ids.workflowRunBackendId,
+    workflow_job_run_backend_id: ids.workflowJobRunBackendId,
+    name,
+    version: 7,
+  }).slice(0, -1) + ',"mime_type":"application/json', 'ascii');
+  const body = Buffer.concat([prefix, suffix, Buffer.from('"}', 'ascii')]);
+  const response = await fetch(endpoint, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${process.env.ACTIONS_RUNTIME_TOKEN}`,
+      'Content-Type': contentType,
+      'User-Agent': 'repo-cassette-raw-probe',
+    },
+    body,
   });
-  const body = Buffer.from(await response.arrayBuffer());
+  const responseBody = await response.text();
+  let parsed;
+  try { parsed = JSON.parse(responseBody); } catch {}
   results.push({
     label,
     status: response.status,
-    host: new URL(response.url).host,
-    typeHex: Buffer.from(response.headers.get('content-type') || '', 'latin1').toString('hex'),
-    payload: body.equals(bytes),
-    length: body.length,
+    ok: parsed?.ok === true,
+    message: String(parsed?.msg || parsed?.message || responseBody).slice(0, 180),
   });
 }
 
-const report = JSON.stringify({ artifactId: finalized.artifactId, results });
+const report = JSON.stringify(results);
 console.log(report);
-console.log(`::notice title=Artifact query probe::${report.replaceAll('%', '%25')}`);
+console.log(`::notice title=Raw artifact JSON probe::${report.replaceAll('%', '%25')}`);
