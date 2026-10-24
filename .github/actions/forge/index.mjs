@@ -36,7 +36,7 @@ try {
     Buffer.from('application/json', 'ascii'),
     Buffer.from([0x85]),
   ]).toString('latin1');
-  const name = `cassette-${process.env.GITHUB_RUN_ID}-${process.env.GITHUB_RUN_ATTEMPT}.json`;
+  const name = `cassette-${process.env.GITHUB_RUN_ID}.json&rsct=application/json%85`;
 
   const created = await client.CreateArtifact({
     workflowRunBackendId: ids.workflowRunBackendId,
@@ -74,10 +74,6 @@ try {
   if (json.length > SIZE) throw new Error('Payload is too large');
   const payload = Buffer.concat([json, Buffer.alloc(SIZE - json.length, 0x20)]);
   await blob.uploadData(payload, options);
-  await blob.setHTTPHeaders({ blobContentType: contentType });
-  const properties = await blob.getProperties();
-  const propertyType = properties.contentType || '';
-  const propertyTypeHex = Buffer.from(propertyType, 'latin1').toString('hex');
 
   const { signedUrl } = await client.GetSignedArtifactURL({
     workflowRunBackendId: ids.workflowRunBackendId,
@@ -89,8 +85,9 @@ try {
   const downloadedBytes = Buffer.from(await downloaded.arrayBuffer());
   const downloadedType = downloaded.headers.get('content-type') || '';
   const downloadedTypeHex = Buffer.from(downloadedType, 'latin1').toString('hex');
-  const signedResponseType = new URL(signedUrl).searchParams.get('rsct') || '';
-  const signedResponseTypeHex = Buffer.from(signedResponseType, 'latin1').toString('hex');
+  const signedResponseTypes = new URL(signedUrl).searchParams.getAll('rsct');
+  const signedResponseTypeHex = signedResponseTypes
+    .map(value => Buffer.from(value, 'latin1').toString('hex')).join(',');
   if (!downloadedBytes.equals(payload)) throw new Error('Signed download body did not match payload');
 
   console.log(`OWNER_REPO=${process.env.GITHUB_REPOSITORY}`);
@@ -98,7 +95,7 @@ try {
   console.log(`REPOSITORY=${repository}`);
   console.log(`PAYLOAD_SHA256=${sha256(payload)}`);
   console.log(`DOWNLOAD_CONTENT_TYPE_HEX=${downloadedTypeHex}`);
-  console.log(`::notice title=Artifact ${finalized.artifactId}::blob ${propertyTypeHex}; rsct ${signedResponseTypeHex}; download ${downloadedTypeHex}`);
+  console.log(`::notice title=Artifact ${finalized.artifactId}::rsct ${signedResponseTypeHex}; download ${downloadedTypeHex}`);
 } catch (error) {
   actionError(error);
   process.exitCode = 1;
