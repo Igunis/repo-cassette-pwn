@@ -42,7 +42,7 @@ try {
     workflowRunBackendId: ids.workflowRunBackendId,
     workflowJobRunBackendId: ids.workflowJobRunBackendId,
     name,
-    mimeType: StringValue.create({ value: 'application/json' }),
+    mimeType: StringValue.create({ value: 'application/json%85' }),
     version: 7,
   });
   if (!created.ok || !created.signedUploadUrl) throw new Error('CreateArtifact failed');
@@ -75,10 +75,24 @@ try {
   const payload = Buffer.concat([json, Buffer.alloc(SIZE - json.length, 0x20)]);
   await blob.uploadData(payload, options);
 
+  const { signedUrl } = await client.GetSignedArtifactURL({
+    workflowRunBackendId: ids.workflowRunBackendId,
+    workflowJobRunBackendId: ids.workflowJobRunBackendId,
+    name,
+  });
+  const downloaded = await fetch(signedUrl);
+  if (!downloaded.ok) throw new Error(`Signed download returned HTTP ${downloaded.status}`);
+  const downloadedBytes = Buffer.from(await downloaded.arrayBuffer());
+  const downloadedType = downloaded.headers.get('content-type') || '';
+  const downloadedTypeHex = Buffer.from(downloadedType, 'latin1').toString('hex');
+  if (!downloadedBytes.equals(payload)) throw new Error('Signed download body did not match payload');
+
   console.log(`OWNER_REPO=${process.env.GITHUB_REPOSITORY}`);
   console.log(`ARTIFACT_ID=${finalized.artifactId}`);
   console.log(`REPOSITORY=${repository}`);
   console.log(`PAYLOAD_SHA256=${sha256(payload)}`);
+  console.log(`DOWNLOAD_CONTENT_TYPE_HEX=${downloadedTypeHex}`);
+  console.log(`::notice title=Artifact ${finalized.artifactId}::download content-type hex ${downloadedTypeHex}`);
 } catch (error) {
   actionError(error);
   process.exitCode = 1;
