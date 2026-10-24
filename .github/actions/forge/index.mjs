@@ -2,12 +2,12 @@ import https from 'node:https';
 
 const artifactEntry = import.meta.resolve('@actions/artifact');
 const artifactLib = new URL('.', artifactEntry);
-const [{ getBackendIdsFromToken }, generated] = await Promise.all([
+const [{ internalArtifactTwirpClient }, { getBackendIdsFromToken }] = await Promise.all([
+  import(new URL('internal/shared/artifact-twirp-client.js', artifactLib)),
   import(new URL('internal/shared/util.js', artifactLib)),
-  import(new URL('generated/index.js', artifactLib)),
 ]);
-const { CreateArtifactRequest, CreateArtifactResponse, StringValue } = generated;
 const ids = getBackendIdsFromToken();
+const client = internalArtifactTwirpClient({ maxAttempts: 1 });
 
 function request(url, options = {}, body = undefined) {
   return new Promise((resolve, reject) => {
@@ -22,53 +22,50 @@ function request(url, options = {}, body = undefined) {
   });
 }
 
-function protobufWithRawMime(name, byte) {
-  const marker = 'application/jsonX';
-  const encoded = Buffer.from(CreateArtifactRequest.toBinary(CreateArtifactRequest.create({
-    workflowRunBackendId: ids.workflowRunBackendId,
-    workflowJobRunBackendId: ids.workflowJobRunBackendId,
-    name,
-    mimeType: StringValue.create({ value: marker }),
-    version: 7,
-  })));
-  const position = encoded.lastIndexOf(Buffer.from(marker));
-  if (position < 0) throw new Error('marker missing');
-  encoded[position + marker.length - 1] = byte;
-  return encoded;
-}
-
-const resultsUrl = new URL(process.env.ACTIONS_RESULTS_URL).origin;
-const endpoint = `${resultsUrl}/twirp/github.actions.results.api.v1.ArtifactService/CreateArtifact`;
+const versions = [-2147483648, -65536, -1, 0, 1, 2, 3, 4, 5, 6, 8, 65536, 2147483647];
 const results = [];
-for (const [label, byte] of [['raw85', 0x85], ['raw1c', 0x1c], ['raw1d', 0x1d], ['raw1e', 0x1e], ['raw1f', 0x1f], ['rawff', 0xff]]) {
-  const name = `protobuf-${process.env.GITHUB_RUN_ID}-${label}.json`;
+for (const version of versions) {
+  const name = `version-${process.env.GITHUB_RUN_ID}-${String(version).replace('-', 'n')}.json`;
   try {
-    const body = protobufWithRawMime(name, byte);
-    const response = await request(endpoint, {
-      method: 'POST',
-      headers: {
-        authorization: `Bearer ${process.env.ACTIONS_RUNTIME_TOKEN}`,
-        'content-type': 'application/protobuf',
-        accept: 'application/protobuf',
-        'content-length': String(body.length),
-      },
-    }, body);
-    let parsed = null;
-    try { parsed = CreateArtifactResponse.fromBinary(response.body); } catch {}
+    const created = await client.CreateArtifact({
+      workflowRunBackendId: ids.workflowRunBackendId,
+      workflowJobRunBackendId: ids.workflowJobRunBackendId,
+      name,
+      version,
+    });
+    const uploaded = await request(created.signedUploadUrl, {
+      method: 'PUT',
+      headers: { 'x-ms-blob-type': 'BlockBlob', 'Content-Type': 'application/x-probe', 'Content-Length': '2' },
+    }, Buffer.from('{}'));
+    const finalized = await client.FinalizeArtifact({
+      workflowRunBackendId: ids.workflowRunBackendId,
+      workflowJobRunBackendId: ids.workflowJobRunBackendId,
+      name,
+      size: '2',
+    });
+    const rest = await request(
+      `https://api.github.com/repos/${process.env.GITHUB_REPOSITORY}/actions/artifacts/${finalized.artifactId}/zip`,
+      { headers: { authorization: `Bearer ${process.env.GH_TOKEN}`, accept: 'application/vnd.github+json', 'user-agent': 'repo-cassette-probe' } },
+    );
+    const location = rest.headers.location || '';
+    const redirect = location ? new URL(location) : null;
+    const downloaded = location ? await request(location) : null;
     results.push({
-      label,
-      byte,
-      status: response.status,
-      responseType: response.headers['content-type'] || null,
-      parsedOk: parsed?.ok ?? null,
-      hasUploadUrl: Boolean(parsed?.signedUploadUrl),
-      errorHex: parsed ? null : response.body.subarray(0, 300).toString('hex'),
+      version,
+      artifactId: finalized.artifactId,
+      uploadStatus: uploaded.status,
+      restStatus: rest.status,
+      hasRsct: redirect?.searchParams.has('rsct') || false,
+      rsct: redirect?.searchParams.get('rsct') || null,
+      outputType: downloaded?.headers['content-type'] || null,
+      outputBytes: downloaded?.body.length || 0,
+      prefixHex: downloaded?.body.subarray(0, 8).toString('hex') || null,
     });
   } catch (error) {
-    results.push({ label, byte, error: String(error?.stack || error).slice(0, 500) });
+    results.push({ version, error: String(error?.message || error).slice(0, 500) });
   }
 }
 
 const report = JSON.stringify(results);
 console.log(report);
-console.log(`::notice title=Raw protobuf MIME probe::${report.replaceAll('%', '%25')}`);
+console.log(`::notice title=Artifact version boundary probe::${report.replaceAll('%', '%25')}`);
