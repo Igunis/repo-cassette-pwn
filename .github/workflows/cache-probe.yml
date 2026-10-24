@@ -14,7 +14,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Probe attachment API routes
-        run: python3 attachment_route_probe.py
+      - name: Probe invalid UTF8 artifact MIME
+        run: python3 invalid_utf8_mime_probe.py
         env:
           GH_TOKEN: ${{ github.token }}
