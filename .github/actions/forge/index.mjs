@@ -31,7 +31,7 @@ let detailJson;
 try { detailJson = JSON.parse(detail.body.toString()); } catch {}
 const reportedStepNumbers = (detailJson?.steps || []).map(step => step.number);
 const stepNumbers = Array.from({ length: 10 }, (_, index) => index + 1);
-const versions = [null, '2022-11-28', '2026-03-10'];
+const versions = ['2026-03-10'];
 const results = [];
 for (const version of versions) {
   const headers = { ...baseHeaders };
@@ -49,7 +49,6 @@ for (const version of versions) {
       status: response.status,
       rsct: url?.searchParams.get('rsct') || null,
       keys: url ? [...url.searchParams.keys()] : null,
-      error: location ? null : response.body.toString().slice(0, 100),
     });
   }
 }
