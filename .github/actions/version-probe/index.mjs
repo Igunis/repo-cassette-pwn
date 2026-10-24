@@ -2,7 +2,6 @@ import { createHash } from 'node:crypto';
 
 import { BlobClient } from '@azure/storage-blob';
 
-const versions = [-2147483648, -2147483641, -1, 0, 1, 4, 5, 6, 7, 8, 2147483647];
 const contentType = Buffer.concat([
   Buffer.from('application/json', 'ascii'),
   Buffer.from([0x85]),
@@ -17,19 +16,24 @@ const [{ internalArtifactTwirpClient }, { getBackendIdsFromToken }, { StringValu
 ]);
 const ids = getBackendIdsFromToken();
 const client = internalArtifactTwirpClient({ maxAttempts: 1 });
+const variants = [
+  ['omitted', request => request],
+  ['undefined', request => ({ ...request, mimeType: undefined })],
+  ['null', request => ({ ...request, mimeType: null })],
+  ['empty-object', request => ({ ...request, mimeType: StringValue.create({}) })],
+  ['empty-string', request => ({ ...request, mimeType: StringValue.create({ value: '' }) })],
+];
 const results = [];
 
-for (const version of versions) {
-  const label = version < 0 ? `neg${-version}` : String(version);
-  const name = `version-${process.env.GITHUB_RUN_ID}-${label}.json`;
+for (const [label, makeRequest] of variants) {
+  const name = `empty-mime-${process.env.GITHUB_RUN_ID}-${label}.json`;
   try {
-    const created = await client.CreateArtifact({
+    const created = await client.CreateArtifact(makeRequest({
       workflowRunBackendId: ids.workflowRunBackendId,
       workflowJobRunBackendId: ids.workflowJobRunBackendId,
       name,
-      mimeType: StringValue.create({ value: contentType }),
-      version,
-    });
+      version: 7,
+    }));
     if (!created.ok) throw new Error('CreateArtifact returned ok=false');
     const bytes = Buffer.from('{}');
     const blob = new BlobClient(created.signedUploadUrl).getBlockBlobClient();
@@ -47,18 +51,18 @@ for (const version of versions) {
       name,
     });
     const response = await fetch(signedUrl);
-    const responseType = response.headers.get('content-type') || '';
     results.push({
-      version,
+      label,
       accepted: true,
       artifactId: finalized.artifactId,
-      outputHex: Buffer.from(responseType, 'latin1').toString('hex'),
+      outputHex: Buffer.from(response.headers.get('content-type') || '', 'latin1').toString('hex'),
+      rsct: new URL(signedUrl).searchParams.getAll('rsct'),
     });
   } catch (error) {
-    results.push({ version, accepted: false });
+    results.push({ label, accepted: false, error: String(error?.message || error).slice(0, 160) });
   }
 }
 
 const report = JSON.stringify(results);
 console.log(report);
-console.log(`::notice title=Version probe::${report.replaceAll('%', '%25')}`);
+console.log(`::notice title=Empty artifact MIME probe::${report.replaceAll('%', '%25')}`);
