@@ -63,13 +63,7 @@ try {
   jobId = jobs.find(job => job.name === process.env.GITHUB_JOB)?.id || jobs[0]?.id;
 } catch {}
 
-const restResponse = jobId ? await request(
-  `https://api.github.com/repos/${process.env.GITHUB_REPOSITORY}/actions/jobs/${jobId}/logs`,
-  { method: 'HEAD', headers: apiHeaders },
-) : null;
 const blobHead = signedUrl ? await request(signedUrl, { method: 'HEAD' }) : null;
-const restLocation = restResponse?.headers.location;
-const restUrl = restLocation ? new URL(restLocation) : null;
 const report = {
   signedStatus: signedResponse.status,
   signedStorage: signedJson?.blob_storage_type || null,
@@ -79,10 +73,6 @@ const report = {
   blobType: blobHead?.headers['content-type'] || null,
   jobsStatus: jobsResponse.status,
   jobId: jobId || null,
-  restStatus: restResponse?.status || null,
-  restLocationHost: restUrl?.host || null,
-  restQueryKeys: restUrl ? [...restUrl.searchParams.keys()] : null,
-  restRsct: restUrl?.searchParams.get('rsct') || null,
 };
 
 const output = JSON.stringify(report);
