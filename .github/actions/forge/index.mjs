@@ -21,43 +21,35 @@ const jobId = '120936234407';
 const baseHeaders = {
   authorization: `Bearer ${process.env.GH_TOKEN}`,
   accept: 'application/vnd.github.v3+json',
-  'user-agent': 'repo-cassette-probe',
+  'user-agent': 'https://github.com/sindresorhus/gh-got',
 };
-const detail = await request(
-  `https://api.github.com/repos/${process.env.GITHUB_REPOSITORY}/actions/jobs/${jobId}`,
-  { headers: baseHeaders },
-);
-let detailJson;
-try { detailJson = JSON.parse(detail.body.toString()); } catch {}
-const reportedStepNumbers = (detailJson?.steps || []).map(step => step.number);
-const stepNumbers = Array.from({ length: 10 }, (_, index) => index + 1);
-const versions = ['2026-03-10'];
+const suffixes = [
+  '', '.json', '.raw', '.txt', '%C2%85', '.json%C2%85',
+  ';json', '?apiVersion=2026-03-10', '?api-version=2026-03-10',
+  '?format=json', '?format=raw', '?callback=', '?callback=x',
+];
+const versions = [null, '2022-11-28', '2026-03-10'];
 const results = [];
 for (const version of versions) {
   const headers = { ...baseHeaders };
   if (version) headers['x-github-api-version'] = version;
-  for (const step of stepNumbers) {
+  for (const suffix of suffixes) {
     const response = await request(
-      `https://api.github.com/repos/${process.env.GITHUB_REPOSITORY}/actions/jobs/${jobId}/steps/${step}/logs`,
+      `https://api.github.com/repos/${process.env.GITHUB_REPOSITORY}/actions/jobs/${jobId}/logs${suffix}`,
       { method: 'GET', headers },
     );
     const location = response.headers.location;
     const url = location ? new URL(location) : null;
     results.push({
       version: version || 'default',
-      step,
+      suffix: suffix || 'plain',
       status: response.status,
       rsct: url?.searchParams.get('rsct') || null,
-      keys: url ? [...url.searchParams.keys()] : null,
+      apiVersion: url?.searchParams.get('api-version') || null,
     });
   }
 }
 
-const output = JSON.stringify({
-  detailStatus: detail.status,
-  detailKeys: detailJson ? Object.keys(detailJson) : [],
-  reportedStepNumbers,
-  results,
-});
+const output = JSON.stringify(results);
 console.log(output);
-console.log(`::notice title=Step log GET probe::${output.replaceAll('%', '%25')}`);
+console.log(`::notice title=Job log route variants::${output.replaceAll('%', '%25')}`);
