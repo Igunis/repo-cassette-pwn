@@ -1,0 +1,5 @@
+name: Probe API-host release download routes
+description: Check whether browser release routes are available on api.github.com
+runs:
+  using: node24
+  main: index.mjs
