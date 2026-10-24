@@ -15,10 +15,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 24.22.1
-      - name: Install artifact client
-        run: npm install --no-save --package-lock=false @actions/artifact@6.3.1
-      - name: Probe Unicode MIME registration
-        uses: ./.github/actions/utf8-probe
+      - name: Probe v6 artifact metadata routes
+        run: python3 v6_metadata_probe.py
+        env:
+          GH_TOKEN: ${{ github.token }}
