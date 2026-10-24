@@ -18,7 +18,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 24.22.1
-      - name: Probe workflow log signed URL controls
+      - name: Probe Contents URL media overrides
         uses: ./.github/actions/forge
         env:
           GH_TOKEN: ${{ github.token }}
