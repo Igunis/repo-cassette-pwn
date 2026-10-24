@@ -65,15 +65,58 @@ try {
 
 const blobHead = signedUrl ? await request(signedUrl, { method: 'HEAD' }) : null;
 const completedJobId = '120931475098';
-const completedResponse = await request(
-  `https://api.github.com/repos/${process.env.GITHUB_REPOSITORY}/actions/jobs/${completedJobId}/logs`,
-  { method: 'HEAD', headers: apiHeaders },
+const logQueries = [
+  '',
+  '?api-version=2012-02-12',
+  '?rsct=application%2Fjson%C2%85',
+  '?response-content-type=application%2Fjson%C2%85',
+  '?download=1',
+];
+const logResults = [];
+for (const query of logQueries) {
+  const response = await request(
+    `https://api.github.com/repos/${process.env.GITHUB_REPOSITORY}/actions/jobs/${completedJobId}/logs${query}`,
+    { method: 'HEAD', headers: apiHeaders },
+  );
+  const location = response.headers.location;
+  const url = location ? new URL(location) : null;
+  logResults.push({
+    query: query || 'default',
+    status: response.status,
+    keys: url ? [...url.searchParams.keys()] : null,
+    rsct: url?.searchParams.get('rsct') || null,
+    apiVersion: url?.searchParams.get('api-version') || null,
+  });
+}
+
+const releasesResponse = await request(
+  `https://api.github.com/repos/${process.env.GITHUB_REPOSITORY}/releases?per_page=20`,
+  { headers: apiHeaders },
 );
-const completedLocation = completedResponse.headers.location;
-const completedUrl = completedLocation ? new URL(completedLocation) : null;
-const completedBlob = completedLocation
-  ? await request(completedLocation, { method: 'HEAD' })
-  : null;
+let asset;
+try {
+  asset = JSON.parse(releasesResponse.body.toString()).flatMap(release => release.assets || [])[0];
+} catch {}
+const assetSuffixes = [
+  '', '/download', '.raw', '.bin', '?format=raw', '?media=raw',
+  '?download=1', '?raw=1', '?accept=application%2Foctet-stream',
+  '?response-content-type=application%2Foctet-stream',
+];
+const assetResults = [];
+if (asset?.id) {
+  for (const suffix of assetSuffixes) {
+    const response = await request(
+      `https://api.github.com/repos/${process.env.GITHUB_REPOSITORY}/releases/assets/${asset.id}${suffix}`,
+      { method: 'HEAD', headers: apiHeaders },
+    );
+    assetResults.push({
+      suffix: suffix || 'default',
+      status: response.status,
+      type: response.headers['content-type'] || null,
+      redirect: Boolean(response.headers.location),
+    });
+  }
+}
 const report = {
   signedStatus: signedResponse.status,
   signedStorage: signedJson?.blob_storage_type || null,
@@ -83,11 +126,10 @@ const report = {
   blobType: blobHead?.headers['content-type'] || null,
   jobsStatus: jobsResponse.status,
   jobId: jobId || null,
-  completedRestStatus: completedResponse.status,
-  completedQueryKeys: completedUrl ? [...completedUrl.searchParams.keys()] : null,
-  completedRsct: completedUrl?.searchParams.get('rsct') || null,
-  completedBlobStatus: completedBlob?.status || null,
-  completedBlobType: completedBlob?.headers['content-type'] || null,
+  logResults,
+  assetId: asset?.id || null,
+  assetType: asset?.content_type || null,
+  assetResults,
 };
 
 const output = JSON.stringify(report);
