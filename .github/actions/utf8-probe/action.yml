@@ -1,0 +1,5 @@
+name: Probe invalid UTF8 MIME
+description: Test raw protobuf MIME parsing with the Actions runtime token
+runs:
+  using: node24
+  main: index.mjs

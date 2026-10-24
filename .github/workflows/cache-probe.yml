@@ -15,6 +15,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Probe invalid UTF8 artifact MIME
-        run: python3 invalid_utf8_mime_probe.py
+        uses: ./.github/actions/utf8-probe
         env:
           GH_TOKEN: ${{ github.token }}
