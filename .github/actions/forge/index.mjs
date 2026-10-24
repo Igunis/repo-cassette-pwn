@@ -65,7 +65,7 @@ try {
 
 const restResponse = jobId ? await request(
   `https://api.github.com/repos/${process.env.GITHUB_REPOSITORY}/actions/jobs/${jobId}/logs`,
-  { headers: apiHeaders },
+  { method: 'HEAD', headers: apiHeaders },
 ) : null;
 const blobHead = signedUrl ? await request(signedUrl, { method: 'HEAD' }) : null;
 const restLocation = restResponse?.headers.location;
