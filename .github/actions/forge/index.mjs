@@ -1,7 +1,6 @@
 import { createHash } from 'node:crypto';
+import tls from 'node:tls';
 import https from 'node:https';
-
-import { BlobClient } from '@azure/storage-blob';
 
 const artifactEntry = import.meta.resolve('@actions/artifact');
 const artifactLib = new URL('.', artifactEntry);
@@ -13,20 +12,51 @@ const [{ internalArtifactTwirpClient }, { getBackendIdsFromToken }, { StringValu
 const ids = getBackendIdsFromToken();
 const client = internalArtifactTwirpClient({ maxAttempts: 1 });
 const metadataType = 'application/octet-stream';
-const blobType = Buffer.concat([
-  Buffer.from('application/json', 'ascii'),
-  Buffer.from([0x85]),
-]).toString('latin1');
-const bytes = Buffer.from('{"probe":"artifact-name"}');
+const payload = Buffer.from('{"probe":"raw-tls"}');
 
-function coreGet(url, headers = {}) {
+function rawPut(url, mode) {
   return new Promise((resolve, reject) => {
-    https.get(url, { headers }, response => {
+    const target = new URL(url);
+    const socket = tls.connect({ host: target.hostname, port: 443, servername: target.hostname });
+    const chunks = [];
+    socket.on('secureConnect', () => {
+      const lines = [
+        `PUT ${target.pathname}${target.search} HTTP/1.1`,
+        `Host: ${target.host}`,
+        `x-ms-version: ${target.searchParams.get('sv')}`,
+        'x-ms-blob-type: BlockBlob',
+      ];
+      const before = Buffer.from(lines.join('\r\n') + '\r\n', 'ascii');
+      const property = mode === 'x-ms'
+        ? Buffer.from('x-ms-blob-content-type: application/json', 'ascii')
+        : Buffer.from('Content-Type: application/json', 'ascii');
+      const afterLines = mode === 'x-ms'
+        ? ['Content-Type: application/octet-stream']
+        : [];
+      const after = Buffer.from(
+        `\r\n${afterLines.length ? `${afterLines.join('\r\n')}\r\n` : ''}` +
+        `Content-Length: ${payload.length}\r\nConnection: close\r\n\r\n`,
+        'ascii',
+      );
+      socket.write(Buffer.concat([before, property, Buffer.from([0x85]), after, payload]));
+    });
+    socket.on('data', chunk => chunks.push(chunk));
+    socket.on('end', () => {
+      const response = Buffer.concat(chunks);
+      const line = response.subarray(0, response.indexOf('\r\n')).toString('latin1');
+      resolve({ status: Number(line.split(' ')[1]), line, response });
+    });
+    socket.on('error', reject);
+  });
+}
+
+function coreGet(url) {
+  return new Promise((resolve, reject) => {
+    https.get(url, response => {
       const chunks = [];
       response.on('data', chunk => chunks.push(chunk));
       response.on('end', () => resolve({
         status: response.statusCode,
-        location: response.headers.location,
         type: response.headers['content-type'] || '',
         body: Buffer.concat(chunks),
       }));
@@ -34,17 +64,9 @@ function coreGet(url, headers = {}) {
   });
 }
 
-const names = [
-  ['plain', `name-${process.env.GITHUB_RUN_ID}.json`],
-  ['encoded-query', `name-${process.env.GITHUB_RUN_ID}%3Fapi-version=2012-02-12.json`],
-  ['double-query', `name-${process.env.GITHUB_RUN_ID}%253Fapi-version%253D2012-02-12.json`],
-  ['encoded-amp', `name-${process.env.GITHUB_RUN_ID}%26api-version%3D2012-02-12.json`],
-  ['hash', `name-${process.env.GITHUB_RUN_ID}#api-version=2012-02-12.json`],
-  ['semicolon', `name-${process.env.GITHUB_RUN_ID};api-version=2012-02-12.json`],
-];
 const results = [];
-
-for (const [label, name] of names) {
+for (const mode of ['x-ms', 'standard']) {
+  const name = `raw-tls-${process.env.GITHUB_RUN_ID}-${mode}.json`;
   try {
     const created = await client.CreateArtifact({
       workflowRunBackendId: ids.workflowRunBackendId,
@@ -53,47 +75,37 @@ for (const [label, name] of names) {
       mimeType: StringValue.create({ value: metadataType }),
       version: 7,
     });
-    const blob = new BlobClient(created.signedUploadUrl).getBlockBlobClient();
-    await blob.uploadData(bytes, { blobHTTPHeaders: { blobContentType: blobType } });
+    const uploaded = await rawPut(created.signedUploadUrl, mode);
+    if (uploaded.status !== 201) {
+      results.push({ mode, uploadStatus: uploaded.status, response: uploaded.response.toString('latin1').slice(0, 300) });
+      continue;
+    }
     const finalized = await client.FinalizeArtifact({
       workflowRunBackendId: ids.workflowRunBackendId,
       workflowJobRunBackendId: ids.workflowJobRunBackendId,
       name,
-      size: String(bytes.length),
-      hash: StringValue.create({ value: `sha256:${createHash('sha256').update(bytes).digest('hex')}` }),
+      size: String(payload.length),
+      hash: StringValue.create({ value: `sha256:${createHash('sha256').update(payload).digest('hex')}` }),
     });
     const { signedUrl } = await client.GetSignedArtifactURL({
       workflowRunBackendId: ids.workflowRunBackendId,
       workflowJobRunBackendId: ids.workflowJobRunBackendId,
       name,
     });
-
-    const api = `https://api.github.com/repos/${process.env.GITHUB_REPOSITORY}/actions/artifacts/${finalized.artifactId}/zip`;
-    const apiHeaders = {
-      Accept: 'application/vnd.github.v3+json',
-      Authorization: `Bearer ${process.env.GH_TOKEN}`,
-      'User-Agent': 'repo-cassette-probe',
-    };
-    const redirect = await coreGet(`${api}?api-version=2012-02-12`, apiHeaders);
-    const followed = redirect.location ? await coreGet(redirect.location) : redirect;
-    const oldProtocol = await coreGet(`${signedUrl}&api-version=2012-02-12`);
-    const parsedSigned = new URL(signedUrl);
+    const old = await coreGet(`${signedUrl}&api-version=2012-02-12`);
     results.push({
-      label,
-      accepted: true,
-      id: finalized.artifactId,
-      redirectHasApiVersion: redirect.location?.includes('api-version') || false,
-      followedStatus: followed.status,
-      followedTypeCodePoints: [...followed.type].map(char => char.codePointAt(0).toString(16)).join(','),
-      oldTypeCodePoints: [...oldProtocol.type].map(char => char.codePointAt(0).toString(16)).join(','),
-      signedPathTail: decodeURIComponent(parsedSigned.pathname).slice(-90),
-      signedRscd: parsedSigned.searchParams.get('rscd'),
+      mode,
+      uploadStatus: uploaded.status,
+      artifactId: finalized.artifactId,
+      downloadStatus: old.status,
+      typeCodePoints: [...old.type].map(char => char.codePointAt(0).toString(16)).join(','),
+      payload: old.body.equals(payload),
     });
   } catch (error) {
-    results.push({ label, accepted: false, error: String(error?.message || error).slice(0, 180) });
+    results.push({ mode, error: String(error?.stack || error).slice(0, 300) });
   }
 }
 
 const report = JSON.stringify(results);
 console.log(report);
-console.log(`::notice title=Artifact name URL probe::${report.replaceAll('%', '%25')}`);
+console.log(`::notice title=Raw TLS blob header probe::${report.replaceAll('%', '%25')}`);
