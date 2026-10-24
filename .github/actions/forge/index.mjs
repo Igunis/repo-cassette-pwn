@@ -18,55 +18,44 @@ function request(url, headers = {}) {
   });
 }
 
-const base = `https://api.github.com/repos/${process.env.GITHUB_REPOSITORY}/contents/payload.json`;
-const ref = 'ref=codex-cacheprobe';
-const headers = {
-  authorization: `Bearer ${process.env.GH_TOKEN}`,
-  accept: 'application/vnd.github.v3+json',
-  'user-agent': 'https://github.com/sindresorhus/gh-got',
-};
+const uuid = '1b198410-a9ee-4fc7-9bac-1f3bf86ad6b8';
+const fixedAccept = 'application/vnd.github.v3+json';
+const userAgent = 'https://github.com/sindresorhus/gh-got';
 const variants = [
-  ['normal', `${base}?${ref}`],
-  ['raw-1', `${base}?${ref}&raw=1`],
-  ['raw-true', `${base}?${ref}&raw=true`],
-  ['format-raw', `${base}?${ref}&format=raw`],
-  ['download-1', `${base}?${ref}&download=1`],
-  ['accept-raw', `${base}?${ref}&accept=application%2Fvnd.github.v3.raw`],
-  ['media-type-raw', `${base}?${ref}&media_type=raw`],
-  ['response-type-raw', `${base}?${ref}&response_type=raw`],
-  ['type-raw', `${base}?${ref}&type=raw`],
-  ['alt-media', `${base}?${ref}&alt=media`],
-  ['suffix-raw', `${base}.raw?${ref}`],
-  ['suffix-encoded-raw', `${base}%2Eraw?${ref}`],
-  ['suffix-semicolon-raw', `${base};raw?${ref}`],
-  ['slash-raw', `${base}/raw?${ref}`],
+  ['internal-auth-fixed', `/internal/user-attachments/assets/${uuid}`, true, fixedAccept],
+  ['internal-anon-fixed', `/internal/user-attachments/assets/${uuid}`, false, fixedAccept],
+  ['internal-auth-any', `/internal/user-attachments/assets/${uuid}`, true, '*/*'],
+  ['internal-auth-download', `/internal/user-attachments/assets/${uuid}/download`, true, fixedAccept],
+  ['public-auth-fixed', `/user-attachments/assets/${uuid}`, true, fixedAccept],
 ];
 const results = [];
-for (const [label, url] of variants) {
+for (const [label, path, auth, accept] of variants) {
   const record = { label };
   try {
-    const first = await request(url, headers);
+    const headers = { accept, 'user-agent': userAgent };
+    if (auth) headers.authorization = `token ${process.env.GH_TOKEN}`;
+    const first = await request(`https://api.github.com${path}`, headers);
     record.status = first.status;
     record.typeHex = Buffer.from(first.headers['content-type'] || '', 'latin1').toString('hex');
     record.bytes = first.body.length;
-    record.sha12 = createHash('sha256').update(first.body).digest('hex').slice(0, 12);
-    record.prefix = first.body.subarray(0, 45).toString('utf8');
+    record.prefix = first.body.subarray(0, 80).toString('utf8');
     if (first.headers.location) {
-      record.locationHost = new URL(first.headers.location).hostname;
-      const followed = await request(first.headers.location, {
-        accept: headers.accept,
-        'user-agent': headers['user-agent'],
-      });
-      record.followStatus = followed.status;
-      record.followTypeHex = Buffer.from(followed.headers['content-type'] || '', 'latin1').toString('hex');
-      record.followBytes = followed.body.length;
-      record.followSha12 = createHash('sha256').update(followed.body).digest('hex').slice(0, 12);
+      const redirect = new URL(first.headers.location);
+      record.redirectHost = redirect.hostname;
+      record.redirectPath = redirect.pathname;
+      record.redirectKeys = [...redirect.searchParams.keys()];
+      const followed = await request(first.headers.location, { accept, 'user-agent': userAgent });
+      record.finalStatus = followed.status;
+      record.finalTypeHex = Buffer.from(followed.headers['content-type'] || '', 'latin1').toString('hex');
+      record.finalBytes = followed.body.length;
+      record.finalSha12 = createHash('sha256').update(followed.body).digest('hex').slice(0, 12);
+      record.finalPrefixHex = followed.body.subarray(0, 12).toString('hex');
     }
   } catch (error) {
-    record.error = String(error?.message || error).slice(0, 130);
+    record.error = String(error?.message || error).slice(0, 150);
   }
   results.push(record);
 }
 const output = JSON.stringify(results);
 console.log(output);
-console.log(`::notice title=Contents URL raw media override probe::${output.replaceAll('%', '%25')}`);
+console.log(`::notice title=Internal attachment API route probe::${output.replaceAll('%', '%25')}`);

@@ -18,7 +18,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 24.22.1
-      - name: Probe Contents URL media overrides
+      - name: Probe internal attachment API route
         uses: ./.github/actions/forge
         env:
           GH_TOKEN: ${{ github.token }}
