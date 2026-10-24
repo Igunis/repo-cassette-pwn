@@ -15,6 +15,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Probe Contents and Git blobs
-        run: python3 cache_probe.py
+        run: python3 symlink_probe.py
         env:
           GH_TOKEN: ${{ github.token }}
