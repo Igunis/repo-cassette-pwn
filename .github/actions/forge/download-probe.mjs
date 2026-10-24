@@ -31,6 +31,7 @@ const blob = `${repo}/git/blobs/e53bff38de42bdecabfb067d645193b018ece134`;
 const attachment = `${root}/internal/user-attachments/assets/1b198410-a9ee-4fc7-9bac-1f3bf86ad6b8`;
 const file = `${root}/internal/user-attachments/files/33385773/strata-iq3_xss_pub.json`;
 const artifact = `${repo}/actions/artifacts/12569682558`;
+const gist = `${root}/gists/80c0d65d8f5429f671c65eb40334887f`;
 const cases = [
   ['release-normal', asset],
   ['release-raw', `${asset}?raw=1`],
@@ -69,9 +70,18 @@ const cases = [
   ['artifact-zip-upper', `${artifact}/ZIP`],
   ['artifact-zip-semicolon', `${artifact}/zip;raw`],
   ['artifact-zip-query', `${artifact}/zip?archive_format=raw`],
+  ['gist-normal', gist],
+  ['gist-raw-query', `${gist}?raw=1`],
+  ['gist-format-query', `${gist}?format=raw`],
+  ['gist-raw', `${gist}/raw`],
+  ['gist-content', `${gist}/content`],
+  ['gist-files', `${gist}/files`],
+  ['gist-raw-name', `${gist}/raw/index.yaml`],
+  ['gist-dot-raw', `${gist}.raw`],
+  ['gist-legacy-raw', `${root}/gists/raw/80c0d65d8f5429f671c65eb40334887f`],
 ];
 
-const results = await Promise.all(cases.filter(([label]) => label.startsWith('artifact-')).map(async ([label, url]) => {
+const results = await Promise.all(cases.filter(([label]) => label.startsWith('gist-')).map(async ([label, url]) => {
   try {
     const res = await get(url);
     const row = {
