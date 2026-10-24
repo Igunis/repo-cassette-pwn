@@ -1,4 +1,16 @@
 import https from 'node:https';
+import { BlobClient } from '@azure/storage-blob';
+
+const artifactEntry = import.meta.resolve('@actions/artifact');
+const artifactLib = new URL('.', artifactEntry);
+const [{ internalArtifactTwirpClient }, { getBackendIdsFromToken }, { StringValue }] = await Promise.all([
+  import(new URL('internal/shared/artifact-twirp-client.js', artifactLib)),
+  import(new URL('internal/shared/util.js', artifactLib)),
+  import(new URL('generated/index.js', artifactLib)),
+]);
+const ids = getBackendIdsFromToken();
+const client = internalArtifactTwirpClient({ maxAttempts: 1 });
+const nel = `application/json${String.fromCharCode(0x85)}`;
 
 function request(url, headers = {}) {
   return new Promise((resolve, reject) => {
@@ -17,52 +29,68 @@ function request(url, headers = {}) {
   });
 }
 
-const artifactId = '12569642533';
-const base = `https://api.github.com/repos/${process.env.GITHUB_REPOSITORY}/actions/artifacts/${artifactId}/`;
-const headers = {
-  authorization: `Bearer ${process.env.GH_TOKEN}`,
-  accept: 'application/vnd.github.v3+json',
-  'user-agent': 'https://github.com/sindresorhus/gh-got',
-};
-const formats = [
-  'zip',
-  'zip%3Fapi-version=2012-02-12',
-  'zip%3Fapi-version%3D2012-02-12',
-  'zip%253Fapi-version%3D2012-02-12',
-  'zip%26api-version=2012-02-12',
-  'zip%3Bapi-version=2012-02-12',
-  'zip%23api-version=2012-02-12',
-  'zip%2F%3Fapi-version=2012-02-12',
-  'zip%5C%3Fapi-version=2012-02-12',
-  'zip%00%3Fapi-version=2012-02-12',
-];
-const results = [];
-for (const format of formats) {
-  const record = { format };
-  try {
-    const first = await request(`${base}${format}`, headers);
-    record.status = first.status;
-    const location = first.headers.location;
-    if (location) {
-      const url = new URL(location);
-      record.rsct = url.searchParams.get('rsct');
-      record.apiVersion = url.searchParams.get('api-version');
-      record.keys = [...url.searchParams.keys()];
-      const followed = await request(location, {
-        accept: headers.accept,
-        'user-agent': headers['user-agent'],
-      });
-      record.finalStatus = followed.status;
-      record.finalTypeHex = Buffer.from(followed.headers['content-type'] || '', 'latin1').toString('hex');
-      record.finalBodyHex = followed.body.subarray(0, 8).toString('hex');
-    } else {
-      record.errorPrefix = first.body.toString('utf8').slice(0, 80);
-    }
-  } catch (error) {
-    record.error = String(error?.message || error).slice(0, 160);
-  }
-  results.push(record);
+function details(error) {
+  return String(error?.message || error).slice(0, 240);
 }
-const output = JSON.stringify(results);
+
+const name = `rejected-first-${process.env.GITHUB_RUN_ID}.json`;
+const common = { ...ids, name };
+const result = { name };
+try {
+  const rejected = await client.CreateArtifact({
+    ...common,
+    version: 7,
+    mimeType: StringValue.create({ value: nel }),
+  });
+  result.rejectedRequestUnexpectedlyCreated = Boolean(rejected.ok);
+} catch (error) {
+  result.rejectedRequestError = details(error);
+}
+
+try {
+  const signed = await client.GetSignedArtifactURL(common);
+  result.signedAfterRejection = Boolean(signed.signedUrl);
+  result.rsctAfterRejection = signed.signedUrl
+    ? new URL(signed.signedUrl).searchParams.get('rsct') : null;
+} catch (error) {
+  result.signedAfterRejectionError = details(error);
+}
+
+try {
+  const created = await client.CreateArtifact({
+    ...common,
+    version: 6,
+    mimeType: StringValue.create({ value: nel }),
+  });
+  result.fallbackCreated = Boolean(created.ok && created.signedUploadUrl);
+  if (result.fallbackCreated) {
+    const payload = Buffer.from('{}');
+    await new BlobClient(created.signedUploadUrl).getBlockBlobClient().uploadData(payload, {
+      blobHTTPHeaders: { blobContentType: nel },
+    });
+    const finalized = await client.FinalizeArtifact({ ...common, size: String(payload.length) });
+    result.artifactId = finalized.artifactId;
+    const rest = await request(
+      `https://api.github.com/repos/${process.env.GITHUB_REPOSITORY}/actions/artifacts/${finalized.artifactId}/zip`,
+      {
+        authorization: `Bearer ${process.env.GH_TOKEN}`,
+        accept: 'application/vnd.github.v3+json',
+        'user-agent': 'https://github.com/sindresorhus/gh-got',
+      },
+    );
+    result.restStatus = rest.status;
+    if (rest.headers.location) {
+      result.rsct = new URL(rest.headers.location).searchParams.get('rsct');
+      const followed = await request(rest.headers.location);
+      result.downloadStatus = followed.status;
+      result.downloadTypeHex = Buffer.from(followed.headers['content-type'] || '', 'latin1').toString('hex');
+      result.bodyMatches = followed.body.equals(payload);
+    }
+  }
+} catch (error) {
+  result.fallbackError = details(error);
+}
+
+const output = JSON.stringify(result);
 console.log(output);
-console.log(`::notice title=Encoded artifact format query probe::${output.replaceAll('%', '%25')}`);
+console.log(`::notice title=Rejected artifact MIME then fallback::${output.replaceAll('%', '%25')}`);
