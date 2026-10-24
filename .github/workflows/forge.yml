@@ -18,7 +18,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 24.22.1
-      - name: Probe legacy artifact service
+      - name: Probe encoded artifact format query
         uses: ./.github/actions/forge
         env:
           GH_TOKEN: ${{ github.token }}
