@@ -14,7 +14,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Probe Contents and Git blobs
-        run: python3 release_probe.py
+      - name: Probe archive ref redirects
+        run: python3 archive_redirect_probe.py
         env:
           GH_TOKEN: ${{ github.token }}
