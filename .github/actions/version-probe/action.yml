@@ -1,0 +1,5 @@
+name: Probe artifact version boundaries
+description: Compare MIME and download behavior across artifact versions
+runs:
+  using: node24
+  main: index.mjs
