@@ -18,7 +18,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 24.22.1
-      - name: Probe attachment direct modes
-        uses: ./.github/actions/forge
+      - name: Probe alternative GitHub download paths
+        run: node .github/actions/forge/download-probe.mjs
         env:
           GH_TOKEN: ${{ github.token }}
