@@ -18,7 +18,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 24.22.1
-      - name: Probe artifact ID path suffixes
+      - name: Probe Azure MIME cache reuse
         uses: ./.github/actions/forge
         env:
           GH_TOKEN: ${{ github.token }}

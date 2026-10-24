@@ -17,53 +17,52 @@ function request(url, headers = {}) {
   });
 }
 
-const artifactId = '12569584437';
-const base = `https://api.github.com/repos/${process.env.GITHUB_REPOSITORY}/actions/artifacts/`;
-const headers = {
+function summarize(response) {
+  return {
+    status: response.status,
+    typeHex: Buffer.from(response.headers['content-type'] || '', 'latin1').toString('hex'),
+    cache: response.headers['cache-control'] || null,
+    age: response.headers.age || null,
+    etag: response.headers.etag || null,
+    bodyHex: response.body.subarray(0, 8).toString('hex'),
+  };
+}
+
+const ghHeaders = {
   authorization: `Bearer ${process.env.GH_TOKEN}`,
   accept: 'application/vnd.github.v3+json',
   'user-agent': 'https://github.com/sindresorhus/gh-got',
 };
-const suffixes = [
-  '',
-  ';api-version=2012-02-12',
-  '%3Bapi-version=2012-02-12',
-  '%3Fapi-version=2012-02-12',
-  '%253Fapi-version%3D2012-02-12',
-  '%26api-version=2012-02-12',
-  '%23api-version=2012-02-12',
-  '.json',
-  '.zip',
-  '%00',
-  '%2F..%2F',
+const blobHeaders = {
+  accept: ghHeaders.accept,
+  'user-agent': ghHeaders['user-agent'],
+};
+const ids = [
+  ['v7-json-metadata', '12569584437'],
+  ['v6-zip-metadata', '12569739244'],
 ];
 const results = [];
-for (const suffix of suffixes) {
-  const record = { suffix };
+for (const [label, artifactId] of ids) {
+  const record = { label, artifactId };
   try {
-    const first = await request(`${base}${artifactId}${suffix}/zip`, headers);
-    record.status = first.status;
-    const location = first.headers.location;
-    if (location) {
-      const url = new URL(location);
-      record.host = url.hostname;
-      record.rsct = url.searchParams.get('rsct');
-      record.apiVersion = url.searchParams.get('api-version');
-      const followed = await request(location, {
-        accept: headers.accept,
-        'user-agent': headers['user-agent'],
-      });
-      record.finalStatus = followed.status;
-      record.finalTypeHex = Buffer.from(followed.headers['content-type'] || '', 'latin1').toString('hex');
-      record.finalBodyHex = followed.body.subarray(0, 8).toString('hex');
+    const api = `https://api.github.com/repos/${process.env.GITHUB_REPOSITORY}/actions/artifacts/${artifactId}/zip`;
+    const rest = await request(api, ghHeaders);
+    record.restStatus = rest.status;
+    if (rest.headers.location) {
+      const signed = rest.headers.location;
+      record.rsct = new URL(signed).searchParams.get('rsct');
+      const old = signed + '&api-version=2012-02-12';
+      record.downgraded = summarize(await request(old, blobHeaders));
+      record.plainAfterDowngrade = summarize(await request(signed, blobHeaders));
+      record.plainRepeat = summarize(await request(signed, blobHeaders));
     } else {
-      record.errorPrefix = first.body.toString('utf8').slice(0, 60);
+      record.errorPrefix = rest.body.toString('utf8').slice(0, 90);
     }
   } catch (error) {
-    record.error = String(error?.message || error).slice(0, 100);
+    record.error = String(error?.message || error).slice(0, 160);
   }
   results.push(record);
 }
 const output = JSON.stringify(results);
 console.log(output);
-console.log(`::notice title=Artifact ID path suffix probe::${output.replaceAll('%', '%25')}`);
+console.log(`::notice title=Azure MIME cache reuse probe::${output.replaceAll('%', '%25')}`);
