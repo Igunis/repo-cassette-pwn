@@ -1,4 +1,3 @@
-import { createHash } from 'node:crypto';
 import tls from 'node:tls';
 import https from 'node:https';
 
@@ -11,10 +10,9 @@ const [{ internalArtifactTwirpClient }, { getBackendIdsFromToken }, { StringValu
 ]);
 const ids = getBackendIdsFromToken();
 const client = internalArtifactTwirpClient({ maxAttempts: 1 });
-const metadataType = 'application/octet-stream';
-const payload = Buffer.from('{"probe":"raw-tls"}');
+const source = 'https://httpbingo.org/response-headers?Content-Type=application%2Fjson%85';
 
-function rawPut(url, protocolVersion, suffix) {
+function rawCopy(url, mode) {
   return new Promise((resolve, reject) => {
     const target = new URL(url);
     const socket = tls.connect({ host: target.hostname, port: 443, servername: target.hostname });
@@ -23,18 +21,16 @@ function rawPut(url, protocolVersion, suffix) {
       const lines = [
         `PUT ${target.pathname}${target.search} HTTP/1.1`,
         `Host: ${target.host}`,
-        'x-ms-blob-type: BlockBlob',
+        'x-ms-version: 2023-11-03',
+        `x-ms-copy-source: ${source}`,
+        ...(mode === 'put-url' ? ['x-ms-blob-type: BlockBlob'] : []),
+        ...(mode === 'sync-copy' ? ['x-ms-requires-sync: true'] : []),
+        'Content-Length: 0',
+        'Connection: close',
+        '',
+        '',
       ];
-      if (protocolVersion) lines.push(`x-ms-version: ${protocolVersion}`);
-      const before = Buffer.from(lines.join('\r\n') + '\r\n', 'ascii');
-      const property = Buffer.from('x-ms-blob-content-type: application/json', 'ascii');
-      const afterLines = ['Content-Type: application/octet-stream'];
-      const after = Buffer.from(
-        `\r\n${afterLines.length ? `${afterLines.join('\r\n')}\r\n` : ''}` +
-        `Content-Length: ${payload.length}\r\nConnection: close\r\n\r\n`,
-        'ascii',
-      );
-      socket.write(Buffer.concat([before, property, suffix, after, payload]));
+      socket.write(Buffer.from(lines.join('\r\n'), 'ascii'));
     });
     socket.on('data', chunk => chunks.push(chunk));
     socket.on('end', () => {
@@ -60,37 +56,34 @@ function coreGet(url) {
   });
 }
 
-const results = [];
-const variants = [
-  ['current-raw', null, Buffer.from([0x85])],
-  ['2012-raw', '2012-02-12', Buffer.from([0x85])],
-  ['2011-raw', '2011-08-18', Buffer.from([0x85])],
-  ['2009-raw', '2009-09-19', Buffer.from([0x85])],
-  ['2012-utf8', '2012-02-12', Buffer.from([0xc2, 0x85])],
-  ['2011-utf8', '2011-08-18', Buffer.from([0xc2, 0x85])],
-  ['2009-utf8', '2009-09-19', Buffer.from([0xc2, 0x85])],
-];
-for (const [label, protocolVersion, suffix] of variants) {
-  const name = `raw-tls-${process.env.GITHUB_RUN_ID}-${label}.json`;
+const sourceResponse = await coreGet(source);
+const results = [{
+  mode: 'source',
+  status: sourceResponse.status,
+  typeCodePoints: [...sourceResponse.type].map(char => char.codePointAt(0).toString(16)).join(','),
+  bytes: sourceResponse.body.length,
+}];
+
+for (const mode of ['put-url', 'copy', 'sync-copy']) {
+  const name = `server-copy-${process.env.GITHUB_RUN_ID}-${mode}.json`;
   try {
     const created = await client.CreateArtifact({
       workflowRunBackendId: ids.workflowRunBackendId,
       workflowJobRunBackendId: ids.workflowJobRunBackendId,
       name,
-      mimeType: StringValue.create({ value: metadataType }),
+      mimeType: StringValue.create({ value: 'application/octet-stream' }),
       version: 7,
     });
-    const uploaded = await rawPut(created.signedUploadUrl, protocolVersion, suffix);
-    if (uploaded.status !== 201) {
-      results.push({ label, uploadStatus: uploaded.status, response: uploaded.response.toString('latin1').slice(0, 300) });
+    const copied = await rawCopy(created.signedUploadUrl, mode);
+    if (copied.status !== 201 && copied.status !== 202) {
+      results.push({ mode, copyStatus: copied.status, response: copied.response.toString('latin1').slice(0, 500) });
       continue;
     }
     const finalized = await client.FinalizeArtifact({
       workflowRunBackendId: ids.workflowRunBackendId,
       workflowJobRunBackendId: ids.workflowJobRunBackendId,
       name,
-      size: String(payload.length),
-      hash: StringValue.create({ value: `sha256:${createHash('sha256').update(payload).digest('hex')}` }),
+      size: String(sourceResponse.body.length),
     });
     const { signedUrl } = await client.GetSignedArtifactURL({
       workflowRunBackendId: ids.workflowRunBackendId,
@@ -99,18 +92,19 @@ for (const [label, protocolVersion, suffix] of variants) {
     });
     const old = await coreGet(`${signedUrl}&api-version=2012-02-12`);
     results.push({
-      label,
-      uploadStatus: uploaded.status,
+      mode,
+      copyStatus: copied.status,
       artifactId: finalized.artifactId,
       downloadStatus: old.status,
       typeCodePoints: [...old.type].map(char => char.codePointAt(0).toString(16)).join(','),
-      payload: old.body.equals(payload),
+      bytes: old.body.length,
+      sourceBody: old.body.equals(sourceResponse.body),
     });
   } catch (error) {
-    results.push({ label, error: String(error?.stack || error).slice(0, 300) });
+    results.push({ mode, error: String(error?.stack || error).slice(0, 500) });
   }
 }
 
 const report = JSON.stringify(results);
 console.log(report);
-console.log(`::notice title=Raw TLS blob header probe::${report.replaceAll('%', '%25')}`);
+console.log(`::notice title=Azure server-side source probe::${report.replaceAll('%', '%25')}`);
