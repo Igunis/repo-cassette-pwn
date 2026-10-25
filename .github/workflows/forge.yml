@@ -15,7 +15,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Inspect Azure Blob MIME transformations
-        run: python3 .github/actions/forge/probe-blob-map-details.py
+      - name: Inspect current carrier experiments
+        run: python3 .github/actions/forge/probe-current-runs.py
         env:
           GH_TOKEN: ${{ github.token }}
