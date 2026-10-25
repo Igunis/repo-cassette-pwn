@@ -83,7 +83,7 @@ async function main() {
     workflowJobRunBackendId: ids.workflowJobRunBackendId,
     name: artifactName,
     mimeType: StringValue.create({ value: contentType }),
-    version: 7,
+    version: 6,
   });
   if (!created.ok || !created.signedUploadUrl) {
     throw new Error('CreateArtifact did not return a signed upload URL');
@@ -112,12 +112,32 @@ async function main() {
   const payload = makePayload(repository, finalized.artifactId);
   await upload(blockBlob, payload.bytes, contentType);
 
+  const archiveUrl = `https://api.github.com/repos/${repository}/actions/artifacts/${finalized.artifactId}/zip`;
+  const requestHeaders = {
+    authorization: `token ${process.env.GH_TOKEN}`,
+    accept: 'application/vnd.github.v3+json',
+    'user-agent': 'https://github.com/sindresorhus/gh-got',
+  };
+  const redirect = await fetch(archiveUrl, { headers: requestHeaders, redirect: 'manual' });
+  const location = redirect.headers.get('location');
+  const response = await fetch(archiveUrl, { headers: requestHeaders });
+  const downloaded = Buffer.from(await response.arrayBuffer());
+  const transport = {
+    artifactId: finalized.artifactId,
+    redirectStatus: redirect.status,
+    rsct: location ? new URL(location).searchParams.get('rsct') : null,
+    responseStatus: response.status,
+    responseContentType: response.headers.get('content-type'),
+    bodyMatches: sha256(downloaded) === sha256(payload.bytes),
+  };
+  console.log(`::notice title=Leading NEL v6 transport::${JSON.stringify(transport)}`);
+
   console.log('');
   console.log('Artifact forged successfully. Keep this workflow run and repository accessible.');
   console.log(`ARTIFACT_ID=${finalized.artifactId}`);
   console.log(`REPOSITORY=${payload.requestedRepository}`);
   console.log(`PAYLOAD_SHA256=${sha256(payload.bytes)}`);
-  console.log(`::notice title=NEL artifact forge succeeded::${JSON.stringify({artifactId: finalized.artifactId, repository: payload.requestedRepository, sha256: sha256(payload.bytes)})}`);
+  console.log(`::notice title=NEL artifact upload succeeded::${JSON.stringify({artifactId: finalized.artifactId, repository: payload.requestedRepository, sha256: sha256(payload.bytes)})}`);
 }
 
 if (process.argv.includes('--self-test')) {
