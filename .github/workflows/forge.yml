@@ -15,7 +15,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Probe release asset route and accepted media types
-        run: python3 .github/actions/forge/probe-release-route.py
+      - name: Audit missing ucan-ca name control probe
+        run: python3 .github/actions/forge/scan-ucan.py
         env:
           GH_TOKEN: ${{ github.token }}
