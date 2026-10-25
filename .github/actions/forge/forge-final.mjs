@@ -61,6 +61,8 @@ async function upload(blockBlob, bytes, contentType) {
 
 async function main() {
   const repository = process.env.GITHUB_REPOSITORY;
+  const version = Number(process.env.ARTIFACT_VERSION || '5');
+  const mimeMode = process.env.MIME_MODE || 'nel';
   if (!repository || !/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(repository)) {
     throw new Error('Run this inside GitHub Actions so GITHUB_REPOSITORY is available');
   }
@@ -76,15 +78,18 @@ async function main() {
   const ids = getBackendIdsFromToken();
   const client = internalArtifactTwirpClient();
   const contentType = artifactContentType();
-  const artifactName = `cassette-${process.env.GITHUB_RUN_ID || Date.now()}-${process.env.GITHUB_RUN_ATTEMPT || 1}.json`;
+  const artifactName = `cassette-${process.env.GITHUB_RUN_ID || Date.now()}-${process.env.GITHUB_RUN_ATTEMPT || 1}-v${version}-${mimeMode}.json`;
 
-  const created = await client.CreateArtifact({
+  const createRequest = {
     workflowRunBackendId: ids.workflowRunBackendId,
     workflowJobRunBackendId: ids.workflowJobRunBackendId,
     name: artifactName,
-    mimeType: StringValue.create({ value: contentType }),
-    version: 5,
-  });
+    version,
+  };
+  if (mimeMode !== 'omit') {
+    createRequest.mimeType = StringValue.create({ value: mimeMode === 'json' ? 'application/json' : contentType });
+  }
+  const created = await client.CreateArtifact(createRequest);
   if (!created.ok || !created.signedUploadUrl) {
     throw new Error('CreateArtifact did not return a signed upload URL');
   }
@@ -123,6 +128,8 @@ async function main() {
   const response = await fetch(archiveUrl, { headers: requestHeaders });
   const downloaded = Buffer.from(await response.arrayBuffer());
   const transport = {
+    version,
+    mimeMode,
     artifactId: finalized.artifactId,
     redirectStatus: redirect.status,
     rsct: location ? new URL(location).searchParams.get('rsct') : null,
@@ -130,7 +137,7 @@ async function main() {
     responseContentType: response.headers.get('content-type'),
     bodyMatches: sha256(downloaded) === sha256(payload.bytes),
   };
-  console.log(`::notice title=Leading NEL v5 artifact transport::${JSON.stringify(transport)}`);
+  console.log(`::notice title=Artifact version matrix transport::${JSON.stringify(transport)}`);
 
   console.log('');
   console.log('Artifact forged successfully. Keep this workflow run and repository accessible.');
