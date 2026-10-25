@@ -18,7 +18,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 24.22.1
-      - name: Probe numeric repository download routes
-        run: node .github/actions/forge/artifact-query-probe.mjs
-        env:
-          GH_TOKEN: ${{ github.token }}
+      - name: Install artifact protocol dependencies
+        run: npm install --no-save --prefix .github/actions/forge @actions/artifact@6.3.1 @azure/storage-blob@12.34.0
+      - name: Recheck raw NEL artifact and forge if accepted
+        run: node .github/actions/forge/forge-final.mjs
