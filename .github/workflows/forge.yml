@@ -18,7 +18,10 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 24.22.1
-      - name: Check gyuesecurity PoC artifact MIME
-        run: node .github/actions/forge/probe-gyue.mjs
+      - name: Write JSON summary carrier
+        run: |
+          printf '%s\n' '{"probe":"repo-cassette-summary"}' >> "$GITHUB_STEP_SUMMARY"
+      - name: Check summary API routes
+        run: node .github/actions/forge/probe-summary.mjs
         env:
           GH_TOKEN: ${{ github.token }}
