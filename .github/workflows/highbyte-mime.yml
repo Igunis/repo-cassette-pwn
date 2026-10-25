@@ -1,9 +1,7 @@
 name: Probe high-byte artifact MIME
 
 on:
-  push:
-    branches:
-      - codex-cacheprobe
+  workflow_dispatch:
 
 permissions:
   actions: write
