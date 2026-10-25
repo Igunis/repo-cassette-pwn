@@ -10,12 +10,9 @@ from collections import Counter
 
 
 TARGETS = [
-    ('CYC4D/repo-cassette-solve', 40174433710),
-    ('EthanYangTW/repo-cassette-ctf-temp-20261024', 40174404323),
-    ('paradox0909/repo-cassette-probe', 40174288232),
-    ('ncves/repo-cassette-carrier', 40174244206),
+    ('slslslslsk/repo-cassette-xf-d914c3c1', 40174360116),
 ]
-MARKERS = ('TRANSITION', 'WINNER', 'MIME_ERROR', 'MIME', 'PROBE', 'BLOCK_CARRIER')
+MARKERS = ('XJOB_CREATE', 'XJOB_FINAL', 'XJOB_CANDIDATE', 'XJOB_DISCOVERY', 'XJOB_REWRITE')
 
 
 def download_logs(repository, run_id):
@@ -116,23 +113,24 @@ for repository, run_id in TARGETS:
                         value = (record.get('rsct') or record.get('finalContentType') or
                                  record.get('view', {}).get('rsct') or
                                  record.get('signedType', {}).get('value') or
-                                 record.get('finalType') or record.get('servedTypeHex'))
+                                 record.get('finalType') or record.get('servedTypeHex') or
+                                 record.get('contentType'))
                         if value is not None:
                             content_types[str(value)] += 1
                         if marker == 'DELETE_SUMMARY':
                             odd_count += int(record.get('odd', 0))
-                        if marker in MARKERS:
+                        if marker in ('XJOB_FINAL', 'XJOB_CANDIDATE'):
                             summaries.append({key: record[key] for key in
-                                              ('case', 'label', 'value', 'i', 'status', 'createStatus',
-                                               'firstVersion', 'secondVersion', 'delay', 'signedType',
-                                               'rsct', 'finalType', 'servedTypeHex', 'error')
+                                              ('side', 'label', 'target', 'foreignTarget', 'status',
+                                               'ok', 'artifactId', 'code', 'msg', 'redirectStatus',
+                                               'rsct', 'contentType', 'bodyMatch')
                                               if key in record})
                         if '\u0085' in str(value) or (marker == 'WINNER'):
                             anomalies.append({'marker': marker, 'type': str(value), 'id': record.get('artifactId') or record.get('id')})
         row.update(files=len(archive.namelist()), markers=dict(markers), parsed=matched,
                    contentTypes=dict(content_types), odd=odd_count, anomalies=anomalies[:8],
                    summaries=summaries[:40], candidateExamples=examples)
-        if repository.startswith('CYC4D/'):
+        if repository.startswith('slslslslsk/'):
             row['artifactDownloads'] = artifact_types(repository, run_id)
     except Exception as error:
         row['error'] = f'{type(error).__name__}: {str(error)[:140]}'
