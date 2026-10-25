@@ -15,7 +15,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Inspect candidate raw artifact MIME overrides
-        run: python3 .github/actions/forge/probe-cyc-signed-mime.py
+      - name: Inspect new public carrier experiments
+        run: python3 .github/actions/forge/probe-new-runs.py
         env:
           GH_TOKEN: ${{ github.token }}
