@@ -18,33 +18,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 24.22.1
-      - name: Install artifact protocol dependencies
-        run: npm install --no-save --prefix .github/actions/forge @actions/artifact@6.3.1 @azure/storage-blob@12.34.0
-      - name: Probe v8 leading NEL MIME
-        uses: ./.github/actions/forge
+      - name: Probe artifact API query forwarding
+        run: node .github/actions/forge/probe-queries.mjs
         env:
           GH_TOKEN: ${{ github.token }}
-          ARTIFACT_VERSION: 8
-          MIME_MODE: nel
-        continue-on-error: true
-      - name: Probe v8 without MIME
-        uses: ./.github/actions/forge
-        env:
-          GH_TOKEN: ${{ github.token }}
-          ARTIFACT_VERSION: 8
-          MIME_MODE: omit
-        continue-on-error: true
-      - name: Probe v7 without MIME
-        uses: ./.github/actions/forge
-        env:
-          GH_TOKEN: ${{ github.token }}
-          ARTIFACT_VERSION: 7
-          MIME_MODE: omit
-        continue-on-error: true
-      - name: Probe v0 leading NEL MIME
-        uses: ./.github/actions/forge
-        env:
-          GH_TOKEN: ${{ github.token }}
-          ARTIFACT_VERSION: 0
-          MIME_MODE: nel
-        continue-on-error: true
