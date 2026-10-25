@@ -1,9 +1,7 @@
 name: Probe artifact migration MIME
 
 on:
-  push:
-    branches:
-      - codex-cacheprobe
+  workflow_dispatch:
 
 permissions:
   actions: read
