@@ -9,30 +9,23 @@ const [{ internalArtifactTwirpClient }, { getBackendIdsFromToken }, { StringValu
 const ids = getBackendIdsFromToken();
 const client = internalArtifactTwirpClient({ maxAttempts: 1 });
 const cases = [
-  ['nel', '\u0085'],
-  ['latin_extended', '\u0185'],
-  ['ipa', '\u0285'],
-  ['greek', '\u0385'],
-  ['cyrillic', '\u0485'],
-  ['armenian', '\u0585'],
-  ['georgian', '\u1085'],
-  ['enclosed', '\u2485'],
-  ['cjk', '\u3085'],
-  ['halfwidth', '\uff85'],
+  ['v7_leading_nel', 7, '\u0085application/json'],
+  ['v7_trailing_nel', 7, 'application/json\u0085'],
+  ['v6_leading_nel', 6, '\u0085application/json'],
+  ['v7_plain_json_control', 7, 'application/json'],
 ];
 
 const rows = [];
-for (const [label, suffix] of cases) {
-  const mime = `application/json${suffix}`;
+for (const [label, version, mime] of cases) {
   const name = `unicode-mime-${process.env.GITHUB_RUN_ID}-${label}`;
-  const row = { label, codepoint: suffix.codePointAt(0).toString(16) };
+  const row = { label, version, mime_hex: Buffer.from(mime, 'latin1').toString('hex') };
   try {
     const created = await client.CreateArtifact({
       workflowRunBackendId: ids.workflowRunBackendId,
       workflowJobRunBackendId: ids.workflowJobRunBackendId,
       name,
       mimeType: StringValue.create({ value: mime }),
-      version: 7,
+      version,
     });
     row.created = Boolean(created.ok);
     if (created.ok) {
@@ -48,4 +41,4 @@ for (const [label, suffix] of cases) {
   }
   rows.push(row);
 }
-console.log('::notice title=Unicode MIME probe::' + JSON.stringify(rows).replaceAll('%', '%25'));
+console.log('::notice title=Leading NEL delivery probe::' + JSON.stringify(rows).replaceAll('%', '%25'));
