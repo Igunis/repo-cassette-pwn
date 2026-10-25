@@ -15,7 +15,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Probe v6 artifact metadata routes
-        run: python3 v6_metadata_probe.py
+      - name: Probe step log download routes
+        run: python3 step_logs_probe.py
         env:
           GH_TOKEN: ${{ github.token }}
