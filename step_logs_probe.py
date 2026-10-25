@@ -17,7 +17,7 @@ session.headers.update({
 rows = []
 for version in (None, '2026-03-10'):
     headers = {} if version is None else {'X-GitHub-Api-Version': version}
-    for label, suffix in [('job', '')] + [(f'step_{n}', f'/steps/{n}/logs') for n in range(1, 6)]:
+    for label, suffix in [('job', '')] + [(f'step_{n}', f'/steps/{n}/logs') for n in range(1, 9)]:
         try:
             response = session.get(root + suffix, headers=headers, allow_redirects=False, timeout=10)
             location = urlparse(response.headers.get('Location', ''))
