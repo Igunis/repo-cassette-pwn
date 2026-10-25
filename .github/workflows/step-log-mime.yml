@@ -1,0 +1,35 @@
+name: Probe step log MIME delivery
+
+on:
+  push:
+    branches:
+      - codex-cacheprobe
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  mint:
+    runs-on: ubuntu-latest
+    outputs:
+      job_id: ${{ steps.probe.outputs.job_id }}
+      step_no: ${{ steps.probe.outputs.step_no }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Carrier target
+        run: echo carrier-target
+      - id: probe
+        uses: ./.github/actions/step-log-mime
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+  verify:
+    needs: mint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: node .github/actions/step-log-mime/verify.mjs
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          CARRIER_JOB_ID: ${{ needs.mint.outputs.job_id }}
+          CARRIER_STEP_NO: ${{ needs.mint.outputs.step_no }}
