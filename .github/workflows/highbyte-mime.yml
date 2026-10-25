@@ -18,4 +18,4 @@ jobs:
         with:
           node-version: 24.22.1
       - run: npm install --no-save --package-lock=false @actions/artifact@6.3.1
-      - run: node highbyte_mime_probe.mjs
+      - uses: ./.github/actions/highbyte-mime
