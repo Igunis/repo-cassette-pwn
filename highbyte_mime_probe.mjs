@@ -1,5 +1,4 @@
 import { createHash } from 'node:crypto';
-import { BlobClient } from '@azure/storage-blob';
 
 const artifactEntry = import.meta.resolve('@actions/artifact');
 const artifactLib = new URL('.', artifactEntry);
@@ -38,9 +37,17 @@ for (const [label, mime] of cases) {
     });
     row.created = Boolean(created.ok);
     if (!created.ok) throw new Error('CreateArtifact returned ok=false');
-    await new BlobClient(created.signedUploadUrl).getBlockBlobClient().uploadData(body, {
-      blobHTTPHeaders: { blobContentType: 'application/octet-stream' },
+    const upload = await fetch(created.signedUploadUrl, {
+      method: 'PUT',
+      headers: {
+        'x-ms-version': new URL(created.signedUploadUrl).searchParams.get('sv') || '2025-11-05',
+        'x-ms-blob-type': 'BlockBlob',
+        'Content-Type': 'application/octet-stream',
+        'Content-Length': String(body.length),
+      },
+      body,
     });
+    if (upload.status !== 201) throw new Error(`Azure upload HTTP ${upload.status}`);
     const finalized = await client.FinalizeArtifact({
       workflowRunBackendId: ids.workflowRunBackendId,
       workflowJobRunBackendId: ids.workflowJobRunBackendId,
