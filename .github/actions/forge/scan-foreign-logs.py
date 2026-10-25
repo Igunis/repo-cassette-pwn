@@ -1,7 +1,10 @@
 import io
 import json
 import os
+import re
 import urllib.request
+import urllib.error
+import urllib.parse
 import zipfile
 from collections import Counter
 
@@ -31,6 +34,45 @@ def download_logs(repository, run_id):
         return data
 
 
+def github_json(repository, path):
+    request = urllib.request.Request(f'https://api.github.com/repos/{repository}{path}', headers={
+        'Authorization': f'Bearer {os.environ["GH_TOKEN"]}',
+        'Accept': 'application/vnd.github.v3+json',
+        'User-Agent': 'repo-cassette-log-audit',
+    })
+    with urllib.request.urlopen(request, timeout=20) as response:
+        return json.load(response)
+
+
+def artifact_types(repository, run_id):
+    listing = github_json(repository, f'/actions/runs/{run_id}/artifacts?per_page=100')
+    ids = [item['id'] for item in listing.get('artifacts', [])]
+    class NoRedirect(urllib.request.HTTPRedirectHandler):
+        def redirect_request(self, request, response, code, message, headers, newurl):
+            return None
+    opener = urllib.request.build_opener(NoRedirect)
+    counts = Counter()
+    unusual = []
+    for artifact_id in ids:
+        request = urllib.request.Request(
+            f'https://api.github.com/repos/{repository}/actions/artifacts/{artifact_id}/zip',
+            headers={'Authorization': f'Bearer {os.environ["GH_TOKEN"]}',
+                     'Accept': 'application/vnd.github.v3+json',
+                     'User-Agent': 'repo-cassette-log-audit'},
+        )
+        try:
+            response = opener.open(request, timeout=20)
+        except urllib.error.HTTPError as error:
+            response = error
+        location = response.headers.get('Location')
+        value = urllib.parse.parse_qs(urllib.parse.urlsplit(location).query).get('rsct', [None])[0] if location else None
+        key = value if response.code == 302 else str(response.code)
+        counts[key] += 1
+        if key not in ('application/json', 'application/zip'):
+            unusual.append({'id': artifact_id, 'status': response.code, 'rsct': value})
+    return {'count': len(ids), 'types': dict(counts), 'unusual': unusual[:8]}
+
+
 def object_after(line, marker):
     position = line.find(marker)
     if position < 0:
@@ -52,6 +94,8 @@ for repository, run_id in TARGETS:
         markers = Counter()
         content_types = Counter()
         anomalies = []
+        examples = []
+        summaries = []
         odd_count = 0
         matched = 0
         for name in archive.namelist():
@@ -66,6 +110,9 @@ for repository, run_id in TARGETS:
                         markers[marker] += 1
                         record = object_after(line, marker)
                         if not record:
+                            if marker == 'CANDIDATE' and len(examples) < 4:
+                                examples.append(re.sub(r'https?://\S+', '[url]',
+                                                       line[line.find(marker):].strip())[:220])
                             continue
                         matched += 1
                         value = record.get('rsct') or record.get('finalContentType') or record.get('view', {}).get('rsct')
@@ -73,10 +120,16 @@ for repository, run_id in TARGETS:
                             content_types[str(value)] += 1
                         if marker == 'DELETE_SUMMARY':
                             odd_count += int(record.get('odd', 0))
+                        if marker in ('DELETE_SUMMARY', 'RACE_SUMMARY'):
+                            summaries.append({key: value for key, value in record.items()
+                                              if isinstance(value, (str, int, float, bool)) or value is None})
                         if '\u0085' in str(value) or (marker == 'WINNER'):
                             anomalies.append({'marker': marker, 'type': str(value), 'id': record.get('artifactId') or record.get('id')})
         row.update(files=len(archive.namelist()), markers=dict(markers), parsed=matched,
-                   contentTypes=dict(content_types), odd=odd_count, anomalies=anomalies[:8])
+                   contentTypes=dict(content_types), odd=odd_count, anomalies=anomalies[:8],
+                   summaries=summaries[:2], candidateExamples=examples)
+        if repository.startswith('sonotri/'):
+            row['artifactDownloads'] = artifact_types(repository, run_id)
     except Exception as error:
         row['error'] = f'{type(error).__name__}: {str(error)[:140]}'
     print(f'::notice title=Foreign race log audit::{json.dumps(row, separators=(",", ":"))}', flush=True)
