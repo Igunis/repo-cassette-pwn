@@ -1,46 +1,48 @@
 import https from 'node:https';
 
-const base = 'https://api.github.com/repos/Igunis/repo-cassette-pwn/actions/artifacts/12569682558/zip';
-const names = [
-  'mime_type', 'mimeType', 'content_type', 'contentType', 'response_content_type',
-  'responseContentType', 'response-content-type', 'download_content_type',
-  'downloadContentType', 'rsct', 'type', 'format', 'archive', 'filename',
-];
-const values = ['application/json', 'application/json\u0085'];
+const repo = 'Igunis/repo-cassette-pwn';
+const repoId = 1432329048;
+const artifactId = 12569682558;
+const assetId = 672783444;
 const headers = {
   authorization: `token ${process.env.GH_TOKEN}`,
   accept: 'application/vnd.github.v3+json',
   'user-agent': 'https://github.com/sindresorhus/gh-got',
 };
 
-function get(url) {
+function request(url) {
   return new Promise((resolve, reject) => {
-    const req = https.get(url, { headers }, res => {
+    const req = https.get(url, {headers}, res => {
       res.resume();
-      res.on('end', () => resolve({ status: res.statusCode, location: res.headers.location }));
+      res.on('end', () => resolve({status: res.statusCode, headers: res.headers}));
     });
     req.on('error', reject);
     req.setTimeout(7000, () => req.destroy(new Error('timeout')));
   });
 }
 
-const jobs = [['control', base]];
-for (const name of names) {
-  for (let i = 0; i < values.length; i++) {
-    const url = new URL(base);
-    url.searchParams.set(name, values[i]);
-    jobs.push([`${name}-${i}`, url.href]);
+const routes = [
+  ['artifact-named', `/repos/${repo}/actions/artifacts/${artifactId}/zip`],
+  ['artifact-numeric', `/repositories/${repoId}/actions/artifacts/${artifactId}/zip`],
+  ['asset-named', `/repos/${repo}/releases/assets/${assetId}`],
+  ['asset-numeric', `/repositories/${repoId}/releases/assets/${assetId}`],
+];
+
+const rows = [];
+for (const [label, path] of routes) {
+  try {
+    const result = await request(`https://api.github.com${path}`);
+    const target = result.headers.location ? new URL(result.headers.location) : null;
+    rows.push({
+      label,
+      status: result.status,
+      contentType: result.headers['content-type'] || null,
+      locationHost: target?.hostname || null,
+      locationPath: target?.pathname || null,
+      rsct: target?.searchParams.get('rsct') || null,
+    });
+  } catch (error) {
+    rows.push({label, error: String(error?.message || error).slice(0, 100)});
   }
 }
-
-const rows = await Promise.all(jobs.map(async ([label, url]) => {
-  try {
-    const response = await get(url);
-    const redirect = response.location ? new URL(response.location) : null;
-    return { label, status: response.status, rsct: redirect?.searchParams.get('rsct') || null };
-  } catch (error) {
-    return { label, error: String(error?.message || error).slice(0, 80) };
-  }
-}));
-const output = JSON.stringify(rows);
-console.log(`::notice title=Artifact MIME query parameters::${output.replaceAll('%', '%25')}`);
+console.log(`::notice title=Numeric repository download routes::${JSON.stringify(rows).replaceAll('%', '%25')}`);
