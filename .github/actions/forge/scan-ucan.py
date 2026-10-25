@@ -33,7 +33,7 @@ def get(path, *, no_redirect=False):
 with get('/actions/runs?per_page=100') as response:
     runs = json.load(response)['workflow_runs']
 
-for run in runs:
+for run in runs[-7:]:
     row = {'run': run['id'], 'sha': run['head_sha'][:8], 'status': run['conclusion']}
     try:
         with get(f"/actions/runs/{run['id']}/logs") as response:
