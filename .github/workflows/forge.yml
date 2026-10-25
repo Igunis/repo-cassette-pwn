@@ -18,7 +18,10 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 24.22.1
-      - name: Check v7 artifact download route aliases
-        run: node .github/actions/forge/probe-formats.mjs
+      - name: Install artifact protocol dependencies
+        run: npm install --no-save --prefix .github/actions/forge @actions/artifact@6.3.1 @azure/storage-blob@12.34.0
+      - name: Race v6 NEL and v7 raw registrations
+        uses: ./.github/actions/forge
         env:
-          GITHUB_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ github.token }}
+          RACE_COUNT: 64
