@@ -18,9 +18,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 24.22.1
-      - name: Install exact app GitHub client
-        run: npm install --no-save --prefix .github/actions/forge gh-got@12.0.0
-      - name: Compare raw and gh-got artifact headers
-        run: node .github/actions/forge/probe-raw-headers.mjs
+      - name: Check v7 artifact download route aliases
+        run: node .github/actions/forge/probe-formats.mjs
         env:
           GITHUB_TOKEN: ${{ github.token }}
