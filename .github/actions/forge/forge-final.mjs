@@ -137,7 +137,8 @@ if (process.argv.includes('--self-test')) {
   } catch (error) {
     const message = String(error?.message || error);
     const validationError = message.includes('mime_type') && message.includes('valid mime_type');
-    console.log(`::notice title=NEL artifact forge failed::${JSON.stringify({stage: validationError ? 'mime-validation' : 'other', error: validationError ? message.slice(0, 180) : String(error?.name || 'Error')})}`);
+    const safeMessage = message.replace(/https?:\/\/\S+/g, '[url]').replace(/[\r\n]/g, ' ').slice(0, 180);
+    console.log(`::notice title=NEL artifact forge failed::${JSON.stringify({stage: validationError ? 'mime-validation' : 'other', error: safeMessage})}`);
     throw error;
   }
 }
