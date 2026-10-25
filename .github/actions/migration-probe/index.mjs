@@ -106,5 +106,7 @@ for (const item of cases) {
   const result = await rpc(method, args);
   const id = result.data.artifact_id || result.data.artifactId;
   const response = await inspect(id);
-  console.log('MIGRATION_PROBE', JSON.stringify({label: item.label, creates, finalize: {status: result.status, code: result.data.code, message: result.data.msg || result.data.message, id}, response}));
+  const row = {label: item.label, creates, finalize: {status: result.status, code: result.data.code, message: result.data.msg || result.data.message, id}, response};
+  console.log('MIGRATION_PROBE', JSON.stringify(row));
+  console.log(`::notice title=MIGRATION_PROBE::${JSON.stringify(row)}`);
 }
