@@ -24,7 +24,7 @@ jobs:
             core.setSecret(token);
             core.exportVariable('ACTIONS_RUNTIME_TOKEN', token);
             core.exportVariable('ACTIONS_RESULTS_URL', url);
-      - name: Probe cross-finalizer artifact routes
-        run: node .github/actions/forge/cross-finalizer.mjs
+      - name: Probe bare NEL in protobuf artifact MIME
+        run: python3 .github/actions/forge/bare-proto-nel.py
         env:
           GITHUB_TOKEN: ${{ github.token }}
