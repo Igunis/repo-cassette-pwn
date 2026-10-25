@@ -15,7 +15,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Audit ucan-ca solver run logs and public artifact types
-        run: python3 .github/actions/forge/scan-ucan.py
+      - name: Probe release asset route and accepted media types
+        run: python3 .github/actions/forge/probe-release-route.py
         env:
           GH_TOKEN: ${{ github.token }}
