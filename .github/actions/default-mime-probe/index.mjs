@@ -75,6 +75,11 @@ async function one(mime, index) {
 }
 
 const variants = [
+  undefined,
+  null,
+  '',
+  ' ',
+  '\t',
   'application/json',
   'application/octet-stream',
   'binary/octet-stream',

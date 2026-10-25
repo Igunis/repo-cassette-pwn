@@ -1,7 +1,9 @@
 name: Probe artifact default MIME delivery
 
 on:
-  workflow_dispatch:
+  push:
+    branches:
+      - codex-cacheprobe
 
 permissions:
   actions: read

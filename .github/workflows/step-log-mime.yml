@@ -1,9 +1,7 @@
 name: Probe step log MIME delivery
 
 on:
-  push:
-    branches:
-      - codex-cacheprobe
+  workflow_dispatch:
 
 permissions:
   actions: read
