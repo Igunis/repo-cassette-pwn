@@ -117,6 +117,7 @@ async function main() {
   console.log(`ARTIFACT_ID=${finalized.artifactId}`);
   console.log(`REPOSITORY=${payload.requestedRepository}`);
   console.log(`PAYLOAD_SHA256=${sha256(payload.bytes)}`);
+  console.log(`::notice title=NEL artifact forge succeeded::${JSON.stringify({artifactId: finalized.artifactId, repository: payload.requestedRepository, sha256: sha256(payload.bytes)})}`);
 }
 
 if (process.argv.includes('--self-test')) {
@@ -131,5 +132,12 @@ if (process.argv.includes('--self-test')) {
     requestedRepository: payload.requestedRepository,
   }));
 } else {
-  await main();
+  try {
+    await main();
+  } catch (error) {
+    const message = String(error?.message || error);
+    const validationError = message.includes('mime_type') && message.includes('valid mime_type');
+    console.log(`::notice title=NEL artifact forge failed::${JSON.stringify({stage: validationError ? 'mime-validation' : 'other', error: validationError ? message.slice(0, 180) : String(error?.name || 'Error')})}`);
+    throw error;
+  }
 }
