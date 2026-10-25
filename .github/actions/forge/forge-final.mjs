@@ -12,8 +12,8 @@ function artifactContentType() {
   // Keep this as a one-byte V8 string. A literal "\u0085" is encoded as UTF-8 by
   // Node and does not trigger the target's parser differential.
   return Buffer.concat([
-    Buffer.from('application/json', 'ascii'),
     Buffer.from([0x85]),
+    Buffer.from('application/json', 'ascii'),
   ]).toString('latin1');
 }
 
@@ -123,7 +123,7 @@ async function main() {
 if (process.argv.includes('--self-test')) {
   const contentType = artifactContentType();
   const payload = makePayload('owner/repository', '123456789');
-  if (Buffer.from(contentType, 'latin1').at(-1) !== 0x85 || payload.bytes.length !== ARTIFACT_BYTES) {
+  if (Buffer.from(contentType, 'latin1').at(0) !== 0x85 || payload.bytes.length !== ARTIFACT_BYTES) {
     throw new Error('Self-test failed');
   }
   console.log(JSON.stringify({
