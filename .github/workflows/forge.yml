@@ -15,7 +15,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Inspect recent public carrier experiments
-        run: python3 .github/actions/forge/probe-fresh-carriers.py
+      - name: Inspect completed Blob MIME and job log experiments
+        run: python3 .github/actions/forge/probe-blob-and-preempt.py
         env:
           GH_TOKEN: ${{ github.token }}
