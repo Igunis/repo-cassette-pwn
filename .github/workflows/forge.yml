@@ -12,10 +12,26 @@ permissions:
 
 jobs:
   forge:
-    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
-      - name: Audit fresh public solver runs and artifact types
-        run: python3 .github/actions/forge/scan-foreign-logs.py
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/github-script@v8
+        with:
+          script: |
+            const token = process.env.ACTIONS_RUNTIME_TOKEN;
+            const url = process.env.ACTIONS_RESULTS_URL;
+            if (!token || !url) throw new Error('Actions artifact runtime is unavailable');
+            core.setSecret(token);
+            core.exportVariable('ACTIONS_RUNTIME_TOKEN', token);
+            core.exportVariable('ACTIONS_RESULTS_URL', url);
+      - name: Probe version 7 NEL by runner OS
+        run: python .github/actions/forge/runner-variant.py
         env:
-          GH_TOKEN: ${{ github.token }}
+          GITHUB_TOKEN: ${{ github.token }}
