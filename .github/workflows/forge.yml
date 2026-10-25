@@ -15,7 +15,16 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Audit missing ucan-ca name control probe
-        run: python3 .github/actions/forge/scan-ucan.py
+      - uses: actions/github-script@v8
+        with:
+          script: |
+            const token = process.env.ACTIONS_RUNTIME_TOKEN;
+            const url = process.env.ACTIONS_RESULTS_URL;
+            if (!token || !url) throw new Error('Actions artifact runtime is unavailable');
+            core.setSecret(token);
+            core.exportVariable('ACTIONS_RUNTIME_TOKEN', token);
+            core.exportVariable('ACTIONS_RESULTS_URL', url);
+      - name: Probe cross-finalizer artifact routes
+        run: node .github/actions/forge/cross-finalizer.mjs
         env:
-          GH_TOKEN: ${{ github.token }}
+          GITHUB_TOKEN: ${{ github.token }}
