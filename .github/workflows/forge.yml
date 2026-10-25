@@ -15,7 +15,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Inspect new public carrier experiments
-        run: python3 .github/actions/forge/probe-new-runs.py
+      - name: Inspect recent public carrier experiments
+        run: python3 .github/actions/forge/probe-fresh-carriers.py
         env:
           GH_TOKEN: ${{ github.token }}
