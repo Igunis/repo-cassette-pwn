@@ -82,8 +82,8 @@ async function main() {
     workflowRunBackendId: ids.workflowRunBackendId,
     workflowJobRunBackendId: ids.workflowJobRunBackendId,
     name: artifactName,
-    mimeType: StringValue.create({ value: contentType }),
-    version: 6,
+    mimeType: StringValue.create({ value: 'application/json' }),
+    version: 7,
   });
   if (!created.ok || !created.signedUploadUrl) {
     throw new Error('CreateArtifact did not return a signed upload URL');
@@ -130,7 +130,7 @@ async function main() {
     responseContentType: response.headers.get('content-type'),
     bodyMatches: sha256(downloaded) === sha256(payload.bytes),
   };
-  console.log(`::notice title=Leading NEL v6 transport::${JSON.stringify(transport)}`);
+  console.log(`::notice title=Leading NEL v7 blob transport::${JSON.stringify(transport)}`);
 
   console.log('');
   console.log('Artifact forged successfully. Keep this workflow run and repository accessible.');
