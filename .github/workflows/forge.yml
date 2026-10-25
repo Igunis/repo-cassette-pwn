@@ -18,7 +18,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 24.22.1
-      - name: Check public cross-job race artifacts
-        run: node .github/actions/forge/probe-external-race.mjs
+      - name: Check gyuesecurity PoC artifact MIME
+        run: node .github/actions/forge/probe-gyue.mjs
         env:
           GH_TOKEN: ${{ github.token }}
