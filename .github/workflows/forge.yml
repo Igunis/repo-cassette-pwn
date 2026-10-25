@@ -12,26 +12,10 @@ permissions:
 
 jobs:
   forge:
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest]
-    runs-on: ${{ matrix.os }}
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
-      - uses: actions/github-script@v8
-        with:
-          script: |
-            const token = process.env.ACTIONS_RUNTIME_TOKEN;
-            const url = process.env.ACTIONS_RESULTS_URL;
-            if (!token || !url) throw new Error('Actions artifact runtime is unavailable');
-            core.setSecret(token);
-            core.exportVariable('ACTIONS_RUNTIME_TOKEN', token);
-            core.exportVariable('ACTIONS_RESULTS_URL', url);
-      - name: Probe version 7 NEL by runner OS
-        run: python .github/actions/forge/runner-variant.py
+      - name: Inspect Iwancof log carrier delivery
+        run: python3 .github/actions/forge/probe-iwancof-logs.py
         env:
-          GITHUB_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ github.token }}
