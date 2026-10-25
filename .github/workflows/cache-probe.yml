@@ -19,6 +19,6 @@ jobs:
         with:
           node-version: 24.22.1
       - name: Install artifact client
-        run: npm install --no-save --package-lock=false @actions/artifact@6.3.1
-      - name: Recheck v7 NEL MIME registration
-        uses: ./.github/actions/utf8-probe
+        run: npm install --no-save --package-lock=false @actions/artifact@6.3.1 @azure/storage-blob
+      - name: Mint v6 self-referential JSON artifact
+        uses: ./.github/actions/mint-v6

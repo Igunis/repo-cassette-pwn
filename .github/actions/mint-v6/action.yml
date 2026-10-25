@@ -1,0 +1,5 @@
+name: Mint v6 Repo Cassette artifact
+description: Create a self-referential artifact with a leading NEL blob MIME
+runs:
+  using: node24
+  main: index.mjs
