@@ -21,4 +21,4 @@ jobs:
       - name: Install artifact protocol dependencies
         run: npm install --no-save --prefix .github/actions/forge @actions/artifact@6.3.1 @azure/storage-blob@12.34.0
       - name: Recheck raw NEL artifact and forge if accepted
-        run: node .github/actions/forge/forge-final.mjs
+        uses: ./.github/actions/forge
