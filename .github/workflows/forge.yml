@@ -15,16 +15,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/github-script@v8
-        with:
-          script: |
-            const token = process.env.ACTIONS_RUNTIME_TOKEN;
-            const url = process.env.ACTIONS_RESULTS_URL;
-            if (!token || !url) throw new Error('Actions artifact runtime is unavailable');
-            core.setSecret(token);
-            core.exportVariable('ACTIONS_RUNTIME_TOKEN', token);
-            core.exportVariable('ACTIONS_RESULTS_URL', url);
-      - name: Probe bare NEL in protobuf artifact MIME
-        run: python3 .github/actions/forge/bare-proto-nel.py
+      - name: Audit fresh public solver runs and artifact types
+        run: python3 .github/actions/forge/scan-foreign-logs.py
         env:
-          GITHUB_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ github.token }}
