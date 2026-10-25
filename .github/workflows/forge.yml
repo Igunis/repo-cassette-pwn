@@ -25,3 +25,4 @@ jobs:
         run: node .github/actions/forge/probe-summary.mjs
         env:
           GH_TOKEN: ${{ github.token }}
+          PROBE_RUN_ID: 40173132909
